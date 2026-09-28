@@ -4,6 +4,7 @@ import { generateReply, type ChatMessage } from "@/lib/openai";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { retrieveRelevantKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { getIntegration } from "@/lib/settings";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -147,7 +148,9 @@ async function runPipeline(
         content: m.body,
       }));
     const knowledge = retrieveRelevantKnowledge(agent.knowledgeSources, text);
-    reply = await generateReply(history, agent.systemPrompt, knowledge);
+    // مفتاح OpenAI من إعدادات مساحة العمل مع .env كبديل
+    const openaiKey = await getIntegration(workspaceId, "OPENAI_API_KEY");
+    reply = await generateReply(history, agent.systemPrompt, knowledge, openaiKey);
   }
 
   if (!reply) {
@@ -204,6 +207,16 @@ export async function handleIncomingWhatsAppMessage(input: {
       return;
     }
 
+    // بيانات واتساب من إعدادات مساحة العمل مع .env كبديل
+    const [waToken, waPhoneNumberId] = await Promise.all([
+      getIntegration(agent.workspaceId, "WHATSAPP_TOKEN"),
+      getIntegration(agent.workspaceId, "WHATSAPP_PHONE_NUMBER_ID"),
+    ]);
+    const waCreds =
+      waToken && waPhoneNumberId
+        ? { token: waToken, phoneNumberId: waPhoneNumberId }
+        : null;
+
     await runPipeline({
       workspaceId: agent.workspaceId,
       agent,
@@ -211,7 +224,7 @@ export async function handleIncomingWhatsAppMessage(input: {
       contactName: input.contactName,
       text: input.text,
       platform: "WHATSAPP",
-      sendReply: sendWhatsAppMessage,
+      sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),
     });
   } catch (e) {
     // لا ندع الويب هوك يفشل أبداً — ميتا تعيد إرسال الحدث عند 5xx

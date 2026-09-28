@@ -1,12 +1,13 @@
 // توليد رد ذكي عبر OpenAI — يعيد null عند غياب المفتاح أو أي فشل
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
+// المفتاح يُمرَّر من المتصل (يُجلب من إعدادات مساحة العمل أو .env)
 export async function generateReply(
   messages: ChatMessage[],
   systemPrompt: string,
-  knowledge: string[]
+  knowledge: string[],
+  apiKey: string | null
 ): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
   // دمج مصادر المعرفة مع التعليمات الأساسية

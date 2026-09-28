@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
+import { getIntegrationCandidates } from "@/lib/settings";
 
 // أنواع مبسطة لبنية حمولة ميتا التي نحتاجها
 interface MetaMessage {
@@ -19,11 +20,9 @@ export async function GET(req: Request) {
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  if (
-    mode === "subscribe" &&
-    token === process.env.WHATSAPP_VERIFY_TOKEN &&
-    challenge
-  ) {
+  // MVP أحادي المستأجر: نقبل التوكن من .env أو من إعدادات أي مساحة عمل
+  const validTokens = await getIntegrationCandidates("WHATSAPP_VERIFY_TOKEN");
+  if (mode === "subscribe" && token && validTokens.includes(token) && challenge) {
     return new Response(challenge, {
       status: 200,
       headers: { "Content-Type": "text/plain" },
@@ -33,20 +32,29 @@ export async function GET(req: Request) {
 }
 
 // التحقق من توقيع ميتا: sha256 + HMAC على الجسم الخام
-function verifySignature(rawBody: string, signature: string | null): boolean {
-  const secret = process.env.META_APP_SECRET;
-  if (!secret) {
-    // للتطوير فقط: بدون META_APP_SECRET نتخطى التحقق — فعّله في الإنتاج
+// نجرّب كل الأسرار المرشحة (.env + إعدادات مساحات العمل)
+async function verifySignature(
+  rawBody: string,
+  signature: string | null
+): Promise<boolean> {
+  const secrets = await getIntegrationCandidates("META_APP_SECRET");
+  if (secrets.length === 0) {
+    // للتطوير فقط: بدون أي سر مضبوط نتخطى التحقق — فعّله في الإنتاج
     console.warn("[webhook] META_APP_SECRET غير مضبوط — تم تخطي التحقق من التوقيع");
     return true;
   }
   if (!signature?.startsWith("sha256=")) return false;
 
-  const expected =
-    "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  const received = Buffer.from(signature);
+  for (const secret of secrets) {
+    const expected = Buffer.from(
+      "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex")
+    );
+    if (received.length === expected.length && crypto.timingSafeEqual(received, expected)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // نص بديل لأنواع الرسائل غير النصية
@@ -66,7 +74,7 @@ function placeholderFor(type: string): string {
 export async function POST(req: Request) {
   // يجب قراءة الجسم الخام قبل أي تحليل — التوقيع يُحسب عليه
   const rawBody = await req.text();
-  if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"))) {
+  if (!(await verifySignature(rawBody, req.headers.get("x-hub-signature-256")))) {
     return new Response("Invalid signature", { status: 401 });
   }
 

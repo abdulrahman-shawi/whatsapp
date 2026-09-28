@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessagesSquare } from "lucide-react";
-import { getPusherClient } from "@/lib/pusher-client";
+import { getPusherInstance, initPusherClient, type Channel } from "@/lib/pusher-client";
 import { ConversationList } from "./conversation-list";
 import { ChatWindow } from "./chat-window";
 import { ContactPanel } from "./contact-panel";
@@ -53,39 +53,47 @@ export function InboxClient({ initialConversations }: Props) {
     return () => clearInterval(t);
   }, [showArchived, refreshList]);
 
-  // اشتراك Pusher الفوري في قناة مساحة العمل — يعمل فقط عند توفر
-  // NEXT_PUBLIC_PUSHER_KEY/CLUSTER، وإلا نعتمد على الاستطلاع أعلاه
+  // اشتراك Pusher الفوري في قناة مساحة العمل — تُجلب المفاتيح من الخادم
+  // (قاعدة البيانات أو .env)، وعند غيابها نعتمد على الاستطلاع أعلاه
   const workspaceId = conversations[0]?.workspaceId;
   useEffect(() => {
-    const pusher = getPusherClient();
-    if (!pusher || !workspaceId) return;
+    if (!workspaceId) return;
 
+    let cancelled = false;
+    let channel: Channel | null = null;
     const channelName = `private-workspace-${workspaceId}`;
-    const channel = pusher.subscribe(channelName);
 
-    // رسالة جديدة: نُلحقها إن كانت للمحادثة المفتوحة (مع منع التكرار)
-    channel.bind(
-      "new-message",
-      (data: { conversationId: string; message: MessageItem }) => {
-        if (data.conversationId === selectedIdRef.current) {
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === data.message.id)) return prev;
-            lastTsRef.current = data.message.createdAt;
-            return [...prev, data.message];
-          });
+    initPusherClient().then((pusher) => {
+      if (!pusher || cancelled) return;
+      channel = pusher.subscribe(channelName);
+
+      // رسالة جديدة: نُلحقها إن كانت للمحادثة المفتوحة (مع منع التكرار)
+      channel.bind(
+        "new-message",
+        (data: { conversationId: string; message: MessageItem }) => {
+          if (data.conversationId === selectedIdRef.current) {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === data.message.id)) return prev;
+              lastTsRef.current = data.message.createdAt;
+              return [...prev, data.message];
+            });
+          }
+          refreshList(showArchivedRef.current);
         }
-        refreshList(showArchivedRef.current);
-      }
-    );
+      );
 
-    // تحديث قائمة المحادثات (آخر رسالة / عدد غير المقروء)
-    channel.bind("conversation-updated", () => {
-      refreshList(showArchivedRef.current);
+      // تحديث قائمة المحادثات (آخر رسالة / عدد غير المقروء)
+      channel.bind("conversation-updated", () => {
+        refreshList(showArchivedRef.current);
+      });
     });
 
     return () => {
-      channel.unbind_all();
-      pusher.unsubscribe(channelName);
+      cancelled = true;
+      if (channel) {
+        channel.unbind_all();
+        getPusherInstance()?.unsubscribe(channelName);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, refreshList]);

@@ -68,6 +68,7 @@ model Workspace {
   contacts   Contact[]
   conversations Conversation[]
   usage      UsageRecord[]
+  settings   Setting[]
 }
 
 // عضوية المستخدم في مساحة عمل مع دوره
@@ -165,4 +166,14 @@ model UsageRecord {
   workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, month])
+}
+
+// مفاتيح التكامل لكل مساحة عمل — القيمة الفارغة/غير الموجودة تعني استخدام .env
+model Setting {
+  workspaceId String
+  key         String
+  value       String    @db.Text
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
 }

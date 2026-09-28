@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Gauge } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Gauge, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
@@ -11,6 +11,7 @@ const navItems = [
   { href: "/agents", label: "الوكلاء", icon: Bot },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
   { href: "/usage", label: "الاستهلاك", icon: Gauge },
+  { href: "/settings", label: "الإعدادات", icon: Settings },
 ];
 
 export function SidebarNav() {

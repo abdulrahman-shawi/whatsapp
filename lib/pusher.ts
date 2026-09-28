@@ -1,26 +1,29 @@
 import Pusher from "pusher";
+import { getIntegration } from "@/lib/settings";
 
-// خادم Pusher: يُنشأ فقط عند توفر جميع متغيرات البيئة، وإلا يبقى null
-// (يبقى النظام يعمل بالاستطلاع الدوري عند غياب الإعداد)
-const globalForPusher = globalThis as unknown as { pusher: Pusher | null };
+// خادم Pusher لكل مساحة عمل: المفاتيح من إعداداتها مع .env كبديل
+// يعيد null عند نقص أي مفتاح (يبقى النظام يعمل بالاستطلاع الدوري)
+// تُخزّن النسخ مؤقتاً حسب مجموعة المفاتيح
+const cache = new Map<string, Pusher>();
 
-export function getPusher(): Pusher | null {
-  const appId = process.env.PUSHER_APP_ID;
-  const key = process.env.NEXT_PUBLIC_PUSHER_KEY;
-  const secret = process.env.PUSHER_SECRET;
-  const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER;
+export async function getPusherServer(
+  workspaceId: string
+): Promise<Pusher | null> {
+  const [appId, key, secret, cluster] = await Promise.all([
+    getIntegration(workspaceId, "PUSHER_APP_ID"),
+    getIntegration(workspaceId, "PUSHER_KEY"),
+    getIntegration(workspaceId, "PUSHER_SECRET"),
+    getIntegration(workspaceId, "PUSHER_CLUSTER"),
+  ]);
   if (!appId || !key || !secret || !cluster) return null;
 
-  if (!globalForPusher.pusher) {
-    globalForPusher.pusher = new Pusher({
-      appId,
-      key,
-      secret,
-      cluster,
-      useTLS: true,
-    });
+  const cacheKey = [appId, key, secret, cluster].join("|");
+  let pusher = cache.get(cacheKey);
+  if (!pusher) {
+    pusher = new Pusher({ appId, key, secret, cluster, useTLS: true });
+    cache.set(cacheKey, pusher);
   }
-  return globalForPusher.pusher;
+  return pusher;
 }
 
 // اسم القناة الخاصة بمساحة العمل
@@ -34,11 +37,13 @@ export function triggerNewMessage(
   conversationId: string,
   message: unknown
 ) {
-  getPusher()
-    ?.trigger(workspaceChannel(workspaceId), "new-message", {
-      conversationId,
-      message,
-    })
+  getPusherServer(workspaceId)
+    .then((pusher) =>
+      pusher?.trigger(workspaceChannel(workspaceId), "new-message", {
+        conversationId,
+        message,
+      })
+    )
     .catch((e) => console.error("[pusher] فشل بث new-message:", e));
 }
 
@@ -47,9 +52,11 @@ export function triggerConversationUpdated(
   workspaceId: string,
   conversationId: string
 ) {
-  getPusher()
-    ?.trigger(workspaceChannel(workspaceId), "conversation-updated", {
-      conversationId,
-    })
+  getPusherServer(workspaceId)
+    .then((pusher) =>
+      pusher?.trigger(workspaceChannel(workspaceId), "conversation-updated", {
+        conversationId,
+      })
+    )
     .catch((e) => console.error("[pusher] فشل بث conversation-updated:", e));
 }

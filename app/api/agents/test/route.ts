@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { generateReply, type ChatMessage } from "@/lib/openai";
+import { getIntegration } from "@/lib/settings";
 
 // تجربة الوكيل دون حفظ: يستقبل حالة النموذج مباشرة ويعيد رداً تجريبياً
 export async function POST(req: Request) {
@@ -29,7 +30,9 @@ export async function POST(req: Request) {
     ? body.knowledge.filter((k: unknown) => typeof k === "string")
     : [];
 
-  const reply = await generateReply(messages, body.systemPrompt, knowledge);
+  // لا يوجد وكيل محفوظ بعد — نستخدم مفاتيح مساحة عمل المستخدم مباشرة
+  const apiKey = await getIntegration(ctx.workspaceId, "OPENAI_API_KEY");
+  const reply = await generateReply(messages, body.systemPrompt, knowledge, apiKey);
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب
   return NextResponse.json({

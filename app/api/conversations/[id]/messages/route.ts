@@ -3,6 +3,7 @@ import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { getIntegration } from "@/lib/settings";
 
 type Params = { params: { id: string } };
 
@@ -92,9 +93,18 @@ export async function POST(req: Request, { params }: Params) {
   triggerConversationUpdated(ctx.workspaceId, params.id);
 
   // الإرسال الخارجي لواتساب فقط — الفشل لا يمنع حفظ الرسالة
+  // بيانات الاعتماد من إعدادات مساحة العمل مع .env كبديل
   let waSent: boolean | null = null;
   if (conversation.platform === "WHATSAPP") {
-    waSent = await sendWhatsAppMessage(conversation.contact.waPhone, text.trim());
+    const [token, phoneNumberId] = await Promise.all([
+      getIntegration(ctx.workspaceId, "WHATSAPP_TOKEN"),
+      getIntegration(ctx.workspaceId, "WHATSAPP_PHONE_NUMBER_ID"),
+    ]);
+    waSent = await sendWhatsAppMessage(
+      conversation.contact.waPhone,
+      text.trim(),
+      token && phoneNumberId ? { token, phoneNumberId } : null
+    );
   }
 
   return NextResponse.json(

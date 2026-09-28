@@ -1,0 +1,168 @@
+// مخطط قاعدة البيانات الكامل للمنصة (PostgreSQL)
+// ملاحظة: بعد ضبط DATABASE_URL نفّذ: npx prisma db push
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// أدوار الأعضاء داخل مساحة العمل
+enum MemberRole {
+  OWNER
+  STAFF
+}
+
+// نوع مصدر المعرفة للوكيل
+enum KnowledgeType {
+  TEXT
+  FILE
+}
+
+// منصة المحادثة
+enum Platform {
+  WHATSAPP
+  WIDGET
+}
+
+// حالة المحادثة: رد آلي / تدخل بشري / تم تسليمها
+enum ConversationStatus {
+  AI
+  MANUAL
+  HANDED_OFF
+}
+
+// اتجاه الرسالة
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+// نوع المرسل
+enum SenderType {
+  AI
+  HUMAN
+  CUSTOMER
+}
+
+// المستخدم: حساب الدخول للمنصة
+model User {
+  id           String            @id @default(cuid())
+  name         String
+  email        String            @unique
+  passwordHash String
+  createdAt    DateTime          @default(now())
+  memberships  WorkspaceMember[]
+}
+
+// مساحة العمل: الكيان التجاري الذي يملك الوكلاء والمحادثات
+model Workspace {
+  id         String            @id @default(cuid())
+  name       String
+  createdAt  DateTime          @default(now())
+  members    WorkspaceMember[]
+  agents     Agent[]
+  contacts   Contact[]
+  conversations Conversation[]
+  usage      UsageRecord[]
+}
+
+// عضوية المستخدم في مساحة عمل مع دوره
+model WorkspaceMember {
+  userId      String
+  workspaceId String
+  role        MemberRole @default(STAFF)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+}
+
+// الوكيل الذكي: إعدادات الرد الآلي والشخصية
+model Agent {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  name             String
+  systemPrompt     String
+  welcomeMessage   String
+  responseDelaySec Int            @default(3) // تأخير الرد بالثواني ليبدو طبيعياً
+  handoffKeywords  String[] // كلمات تفعيل التحويل لموظف بشري
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  knowledgeSources KnowledgeSource[]
+  conversations    Conversation[]
+}
+
+// مصدر معرفة: نص أو ملف يعتمد عليه الوكيل في الردود
+model KnowledgeSource {
+  id        String        @id @default(cuid())
+  agentId   String
+  type      KnowledgeType
+  title     String
+  content   String        @db.Text
+  fileUrl   String?
+  createdAt DateTime      @default(now())
+  agent     Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+// جهة اتصال: عميل واتساب مرتبط بمساحة العمل
+model Contact {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  waPhone      String // رقم الواتساب بصيغة دولية
+  name         String?
+  notes        String?
+  tags         String[]
+  createdAt    DateTime       @default(now())
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([workspaceId, waPhone])
+}
+
+// المحادثة: سلسلة رسائل بين جهة اتصال والمنصة
+model Conversation {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  contactId     String
+  agentId       String?
+  platform      Platform           @default(WHATSAPP)
+  status        ConversationStatus @default(AI)
+  isArchived    Boolean            @default(false)
+  lastMessageAt DateTime?
+  createdAt     DateTime           @default(now())
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact       Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  agent         Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages      Message[]
+}
+
+// الرسالة داخل محادثة
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  direction      MessageDirection
+  body           String           @db.Text
+  senderType     SenderType
+  isRead         Boolean          @default(false)
+  rating         String? // تقييم رد الذكاء الاصطناعي: GOOD أو NEEDS_IMPROVEMENT (صفحة التدريب)
+  createdAt      DateTime         @default(now())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// سجل الاستهلاك الشهري لكل مساحة عمل (لحدود الباقة)
+model UsageRecord {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  month        String // بصيغة "2025-01"
+  messagesUsed Int       @default(0)
+  messageLimit Int       @default(1000)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, month])
+}

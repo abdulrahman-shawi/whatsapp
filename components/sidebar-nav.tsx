@@ -1,0 +1,42 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Inbox, Bot, MessageSquareCode, Gauge } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
+const navItems = [
+  { href: "/inbox", label: "الوارد", icon: Inbox },
+  { href: "/agents", label: "الوكلاء", icon: Bot },
+  { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
+  { href: "/usage", label: "الاستهلاك", icon: Gauge },
+];
+
+export function SidebarNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="flex flex-col gap-1">
+      {navItems.map((item) => {
+        const active =
+          pathname === item.href || pathname.startsWith(item.href + "/");
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              active
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}

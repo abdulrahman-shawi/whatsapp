@@ -1,5 +1,8 @@
 import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
 
+// ننتظر المعالجة كاملة (تأخير الرد + OpenAI) — نحتاج مهلة أطول من الافتراضية
+export const maxDuration = 60;
+
 // بنية حمولة UltraMsg المبسطة التي نحتاجها
 interface UltraMsgData {
   from?: string; // بصيغة 9665xxxxxxxx@c.us
@@ -7,6 +10,7 @@ interface UltraMsgData {
   type?: string;
   body?: string;
   pushname?: string;
+  name?: string;
 }
 
 // نص بديل لأنواع الرسائل غير النصية
@@ -51,12 +55,17 @@ export async function POST(req: Request) {
       : placeholderFor(data.type);
 
   if (text) {
-    // نعالج بشكل غير متزامن ونرد 200 فوراً
-    handleIncomingWhatsAppMessage({
-      waPhone,
-      contactName: data.pushname ?? null,
-      text,
-    }).catch((e) => console.error("[ultramsg-webhook] خطأ أثناء المعالجة:", e));
+    // ننتظر اكتمال المعالجة قبل الرد — على Vercel تُجمَّد الدالة بعد إرسال
+    // الرد، فالمعالجة غير المتزامنة (fire-and-forget) قد لا تكتمل أبداً
+    try {
+      await handleIncomingWhatsAppMessage({
+        waPhone,
+        contactName: data.pushname ?? data.name ?? null,
+        text,
+      });
+    } catch (e) {
+      console.error("[ultramsg-webhook] خطأ أثناء المعالجة:", e);
+    }
   }
 
   return new Response("OK", { status: 200 });

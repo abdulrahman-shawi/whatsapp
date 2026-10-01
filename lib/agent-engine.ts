@@ -188,6 +188,63 @@ async function runPipeline(
   };
 }
 
+// تخزين الرسالة الواردة دون وكيل نشط — محادثة يدوية تظهر في صندوق الوارد
+async function storeInboundWithoutAgent(input: {
+  waPhone: string;
+  contactName: string | null;
+  text: string;
+}): Promise<void> {
+  // MVP أحادي المستأجر: نختار أول مساحة عمل
+  const workspace = await prisma.workspace.findFirst();
+  if (!workspace) {
+    console.log("[agent-engine] لا توجد مساحة عمل — تم تجاهل الرسالة");
+    return;
+  }
+
+  const contact = await prisma.contact.upsert({
+    where: {
+      workspaceId_waPhone: { workspaceId: workspace.id, waPhone: input.waPhone },
+    },
+    update: input.contactName ? { name: input.contactName } : {},
+    create: {
+      workspaceId: workspace.id,
+      waPhone: input.waPhone,
+      name: input.contactName,
+    },
+  });
+
+  let conversation = await prisma.conversation.findFirst({
+    where: { contactId: contact.id, platform: "WHATSAPP", isArchived: false },
+  });
+  if (!conversation) {
+    conversation = await prisma.conversation.create({
+      data: {
+        workspaceId: workspace.id,
+        contactId: contact.id,
+        platform: "WHATSAPP",
+        status: "MANUAL",
+      },
+    });
+  }
+
+  const msg = await prisma.message.create({
+    data: {
+      conversationId: conversation.id,
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      body: input.text,
+    },
+  });
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { lastMessageAt: new Date() },
+  });
+  await incrementUsage(workspace.id);
+
+  triggerNewMessage(workspace.id, conversation.id, msg);
+  triggerConversationUpdated(workspace.id, conversation.id);
+}
+
 // نقطة دخول رسائل واتساب الواردة من الويب هوك
 export async function handleIncomingWhatsAppMessage(input: {
   waPhone: string;
@@ -202,8 +259,8 @@ export async function handleIncomingWhatsAppMessage(input: {
       include: { knowledgeSources: true },
     });
     if (!agent) {
-      // لا يوجد وكيل نشط — نتجاهل الرسالة بهدوء
-      console.log("[agent-engine] لا يوجد وكيل نشط — تم تجاهل الرسالة");
+      // لا يوجد وكيل نشط — نحفظ الرسالة في صندوق الوارد دون رد آلي حتى لا تضيع
+      await storeInboundWithoutAgent(input);
       return;
     }
 

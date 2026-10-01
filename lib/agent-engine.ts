@@ -1,7 +1,7 @@
 import type { Agent, KnowledgeSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateReply, type ChatMessage } from "@/lib/openai";
-import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { retrieveRelevantKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getIntegration } from "@/lib/settings";
@@ -208,14 +208,8 @@ export async function handleIncomingWhatsAppMessage(input: {
     }
 
     // بيانات واتساب من إعدادات مساحة العمل مع .env كبديل
-    const [waToken, waPhoneNumberId] = await Promise.all([
-      getIntegration(agent.workspaceId, "WHATSAPP_TOKEN"),
-      getIntegration(agent.workspaceId, "WHATSAPP_PHONE_NUMBER_ID"),
-    ]);
-    const waCreds =
-      waToken && waPhoneNumberId
-        ? { token: waToken, phoneNumberId: waPhoneNumberId }
-        : null;
+    // ميتا أولاً، وإن كانت حقوله فارغة نستخدم UltraMsg
+    const waCreds = await resolveWhatsAppCreds(agent.workspaceId);
 
     await runPipeline({
       workspaceId: agent.workspaceId,

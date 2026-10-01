@@ -15,6 +15,12 @@ export const INTEGRATION_KEYS = [
     env: ["WHATSAPP_PHONE_NUMBER_ID"],
   },
   { key: "META_APP_SECRET", label: "سر تطبيق Meta", env: ["META_APP_SECRET"] },
+  {
+    key: "ULTRAMSG_INSTANCE_ID",
+    label: "معرّف نسخة UltraMsg",
+    env: ["ULTRAMSG_INSTANCE_ID"],
+  },
+  { key: "ULTRAMSG_TOKEN", label: "توكن UltraMsg", env: ["ULTRAMSG_TOKEN"] },
   { key: "PUSHER_APP_ID", label: "معرّف تطبيق Pusher", env: ["PUSHER_APP_ID"] },
   {
     key: "PUSHER_KEY",

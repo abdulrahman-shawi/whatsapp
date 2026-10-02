@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
-import { generateReply, type ChatMessage } from "@/lib/openai";
-import { getIntegration } from "@/lib/settings";
+import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 
 // تجربة الوكيل دون حفظ: يستقبل حالة النموذج مباشرة ويعيد رداً تجريبياً
 export async function POST(req: Request) {
@@ -30,15 +29,15 @@ export async function POST(req: Request) {
     ? body.knowledge.filter((k: unknown) => typeof k === "string")
     : [];
 
-  // لا يوجد وكيل محفوظ بعد — نستخدم مفاتيح مساحة عمل المستخدم مباشرة
-  const apiKey = await getIntegration(ctx.workspaceId, "OPENAI_API_KEY");
-  const reply = await generateReply(messages, body.systemPrompt, knowledge, apiKey);
+  // لا يوجد وكيل محفوظ بعد — نستخدم إعدادات مساحة عمل المستخدم مباشرة
+  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const reply = await generateReply(messages, body.systemPrompt, knowledge, aiConfig);
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب
   return NextResponse.json({
     reply:
       reply ??
-      "لا يمكن توليد رد حالياً — تأكد من إعداد مفتاح OpenAI في إعدادات البيئة",
+      "لا يمكن توليد رد حالياً — تأكد من إعداد مفتاح الذكاء الاصطناعي في صفحة الإعدادات",
     fallback: reply === null,
   });
 }

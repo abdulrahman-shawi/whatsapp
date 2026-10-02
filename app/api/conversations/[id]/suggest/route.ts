@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { generateReply, type ChatMessage } from "@/lib/openai";
-import { getIntegration } from "@/lib/settings";
+import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 
 // اقتراح رد ذكي بناءً على تعليمات الوكيل ومصادر المعرفة وآخر ١٠ رسائل
 export async function POST(
@@ -38,9 +37,9 @@ export async function POST(
   const knowledge =
     conversation.agent?.knowledgeSources.map((k) => k.content) ?? [];
 
-  // مفتاح OpenAI من إعدادات مساحة العمل مع .env كبديل
-  const apiKey = await getIntegration(ctx.workspaceId, "OPENAI_API_KEY");
-  const suggestion = await generateReply(history, systemPrompt, knowledge, apiKey);
+  // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
+  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const suggestion = await generateReply(history, systemPrompt, knowledge, aiConfig);
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب — لا نرجع 500 أبداً هنا
   return NextResponse.json({

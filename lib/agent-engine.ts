@@ -1,10 +1,9 @@
 import type { Agent, KnowledgeSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { generateReply, type ChatMessage } from "@/lib/openai";
+import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { retrieveRelevantKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
-import { getIntegration } from "@/lib/settings";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -148,9 +147,9 @@ async function runPipeline(
         content: m.body,
       }));
     const knowledge = retrieveRelevantKnowledge(agent.knowledgeSources, text);
-    // مفتاح OpenAI من إعدادات مساحة العمل مع .env كبديل
-    const openaiKey = await getIntegration(workspaceId, "OPENAI_API_KEY");
-    reply = await generateReply(history, agent.systemPrompt, knowledge, openaiKey);
+    // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
+    const aiConfig = await resolveAiConfig(workspaceId);
+    reply = await generateReply(history, agent.systemPrompt, knowledge, aiConfig);
   }
 
   if (!reply) {

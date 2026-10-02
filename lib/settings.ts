@@ -2,7 +2,22 @@ import { prisma } from "@/lib/prisma";
 
 // مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً ثم .env كبديل
 export const INTEGRATION_KEYS = [
-  { key: "OPENAI_API_KEY", label: "مفتاح OpenAI", env: ["OPENAI_API_KEY"] },
+  { key: "AI_PROVIDER", label: "مزوّد الذكاء الاصطناعي", env: ["AI_PROVIDER"] },
+  {
+    key: "OPENAI_API_KEY",
+    label: "مفتاح الذكاء الاصطناعي (API Key)",
+    env: ["OPENAI_API_KEY"],
+  },
+  {
+    key: "AI_MODEL",
+    label: "اسم النموذج (اختياري)",
+    env: ["AI_MODEL"],
+  },
+  {
+    key: "AI_BASE_URL",
+    label: "رابط API مخصص (اختياري)",
+    env: ["AI_BASE_URL"],
+  },
   { key: "WHATSAPP_TOKEN", label: "توكن واتساب", env: ["WHATSAPP_TOKEN"] },
   {
     key: "WHATSAPP_VERIFY_TOKEN",
@@ -36,6 +51,22 @@ export const INTEGRATION_KEYS = [
 ] as const;
 
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number]["key"];
+
+// مفاتيح غير سرية — تُعرض قيمتها كنص صريح في الواجهة بدل الإخفاء
+const NON_SECRET = new Set<string>(["AI_PROVIDER", "AI_MODEL", "AI_BASE_URL"]);
+
+// خيارات القائمة المنسدلة للمفاتيح التي تُختار من قائمة بدل الإدخال الحر
+export const KEY_OPTIONS: Partial<
+  Record<IntegrationKey, readonly { value: string; label: string }[]>
+> = {
+  AI_PROVIDER: [
+    { value: "openai", label: "OpenAI" },
+    { value: "gemini", label: "Google Gemini" },
+    { value: "kimi", label: "Kimi (Moonshot)" },
+    { value: "openrouter", label: "OpenRouter (Claude وغيره)" },
+    { value: "custom", label: "مخصص — رابط خاص" },
+  ],
+};
 
 const KEY_SET = new Set<string>(INTEGRATION_KEYS.map((d) => d.key));
 
@@ -87,10 +118,14 @@ export type IntegrationInfo = {
   label: string;
   envName: string;
   masked: string | null;
+  // القيمة الصريحة للمفاتيح غير السرية فقط — null للسرية
+  value: string | null;
+  secret: boolean;
+  options: readonly { value: string; label: string }[] | null;
   source: "db" | "env" | null;
 };
 
-// قائمة مقنّعة للعرض في الواجهة — لا تُرجع القيم الخام أبداً
+// قائمة مقنّعة للعرض في الواجهة — القيم السرية لا تُرجع خاماً أبداً
 export async function getIntegrationList(
   workspaceId: string
 ): Promise<IntegrationInfo[]> {
@@ -99,14 +134,20 @@ export async function getIntegrationList(
   });
 
   return INTEGRATION_KEYS.map((def) => {
+    const secret = !NON_SECRET.has(def.key);
+    const options = KEY_OPTIONS[def.key] ?? null;
     const row = rows.find((r) => r.key === def.key);
-    if (row?.value) {
-      return { key: def.key, label: def.label, envName: def.env[0], masked: mask(row.value), source: "db" };
-    }
-    const envVal = envFallback(def);
-    if (envVal) {
-      return { key: def.key, label: def.label, envName: def.env[0], masked: mask(envVal), source: "env" };
-    }
-    return { key: def.key, label: def.label, envName: def.env[0], masked: null, source: null };
+    const raw = row?.value || envFallback(def);
+    const source = row?.value ? "db" : raw ? "env" : null;
+    return {
+      key: def.key,
+      label: def.label,
+      envName: def.env[0],
+      masked: secret && raw ? mask(raw) : null,
+      value: secret ? null : raw,
+      secret,
+      options,
+      source,
+    };
   });
 }

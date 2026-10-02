@@ -82,9 +82,14 @@ export function IntegrationsForm({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {item.masked && (
+              {(item.masked || item.value) && (
                 <span className="text-xs text-muted-foreground" dir="ltr">
-                  {cleared[item.key] ? "—" : item.masked}
+                  {cleared[item.key]
+                    ? "—"
+                    : item.options
+                      ? item.options.find((o) => o.value === item.value)?.label ??
+                        item.value
+                      : (item.masked ?? item.value)}
                 </span>
               )}
               {cleared[item.key] ? (
@@ -95,19 +100,41 @@ export function IntegrationsForm({
             </div>
           </div>
           <div className="mt-3 flex gap-2">
-            <Input
-              id={`key-${item.key}`}
-              type="password"
-              dir="ltr"
-              className="text-left"
-              placeholder="اتركه فارغاً لاستخدام قيمة .env"
-              value={draft[item.key] ?? ""}
-              onChange={(e) => {
-                setDraft((prev) => ({ ...prev, [item.key]: e.target.value }));
-                setCleared((prev) => ({ ...prev, [item.key]: false }));
-                setSaved(false);
-              }}
-            />
+            {item.options ? (
+              <select
+                id={`key-${item.key}`}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={draft[item.key] ?? ""}
+                onChange={(e) => {
+                  setDraft((prev) => ({ ...prev, [item.key]: e.target.value }));
+                  setCleared((prev) => ({ ...prev, [item.key]: false }));
+                  setSaved(false);
+                }}
+              >
+                <option value="">
+                  {item.value ? "الإبقاء على الحالي" : "الافتراضي: OpenAI"}
+                </option>
+                {item.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                id={`key-${item.key}`}
+                type={item.secret ? "password" : "text"}
+                dir="ltr"
+                className="text-left"
+                placeholder="اتركه فارغاً لاستخدام قيمة .env"
+                value={draft[item.key] ?? ""}
+                onChange={(e) => {
+                  setDraft((prev) => ({ ...prev, [item.key]: e.target.value }));
+                  setCleared((prev) => ({ ...prev, [item.key]: false }));
+                  setSaved(false);
+                }}
+              />
+            )}
             {item.source === "db" && !cleared[item.key] && (
               <Button
                 type="button"

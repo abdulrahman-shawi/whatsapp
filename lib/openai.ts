@@ -9,7 +9,7 @@ export const AI_PROVIDERS = {
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   gemini: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: "gemini-2.0-flash",
+    model: "gemini-3.8-flash",
   },
   kimi: { baseUrl: "https://api.moonshot.ai/v1", model: "kimi-k2-0711-preview" },
   openrouter: {

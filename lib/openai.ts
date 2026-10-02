@@ -79,12 +79,19 @@ export async function generateReply(
         }),
       }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(
+        `[ai] فشل الطلب إلى ${config.baseUrl} (${res.status}): ${errText.slice(0, 500)}`
+      );
+      return null;
+    }
 
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content;
     return typeof content === "string" && content.trim() ? content.trim() : null;
-  } catch {
+  } catch (e) {
+    console.error("[ai] تعذّر الاتصال بالمزوّد:", e);
     return null;
   }
 }

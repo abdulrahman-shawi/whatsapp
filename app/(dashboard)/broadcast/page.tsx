@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function BroadcastPage() {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
+  if (ctx.role !== "OWNER") redirect("/inbox");
 
   const [campaigns, contacts, templates] = await Promise.all([
     prisma.broadcastCampaign.findMany({
@@ -41,6 +42,7 @@ export default async function BroadcastPage() {
         initialCampaigns={campaigns.map((c) => ({
           ...c,
           createdAt: c.createdAt.toISOString(),
+          scheduledAt: c.scheduledAt ? c.scheduledAt.toISOString() : null,
         }))}
         tags={tags}
         templates={templates}

@@ -33,6 +33,9 @@ async function extractText(
 export async function POST(req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (ctx.role !== "OWNER") {
+    return NextResponse.json({ error: "التعديل للمالك فقط" }, { status: 403 });
+  }
 
   const agent = await prisma.agent.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },

@@ -23,6 +23,9 @@ export async function GET(_req: Request, { params }: Params) {
 export async function PATCH(req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (ctx.role !== "OWNER") {
+    return NextResponse.json({ error: "التعديل للمالك فقط" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {
@@ -91,6 +94,9 @@ export async function PATCH(req: Request, { params }: Params) {
 export async function DELETE(_req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (ctx.role !== "OWNER") {
+    return NextResponse.json({ error: "الحذف للمالك فقط" }, { status: 403 });
+  }
 
   const existing = await prisma.agent.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },

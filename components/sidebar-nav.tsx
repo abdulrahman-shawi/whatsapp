@@ -8,20 +8,22 @@ import { cn } from "@/lib/utils";
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
 const navItems = [
   { href: "/inbox", label: "الوارد", icon: Inbox },
-  { href: "/broadcast", label: "الحملات", icon: Megaphone },
-  { href: "/agents", label: "الوكلاء", icon: Bot },
+  { href: "/broadcast", label: "الحملات", icon: Megaphone, ownerOnly: true },
+  { href: "/agents", label: "الوكلاء", icon: Bot, ownerOnly: true },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
   { href: "/usage", label: "الاستهلاك", icon: Gauge },
-  { href: "/billing", label: "الاشتراك", icon: CreditCard },
-  { href: "/settings", label: "الإعدادات", icon: Settings },
+  { href: "/billing", label: "الاشتراك", icon: CreditCard, ownerOnly: true },
+  { href: "/settings", label: "الإعدادات", icon: Settings, ownerOnly: true },
 ];
 
-export function SidebarNav() {
+// الموظف يرى الوارد والويدجت والاستهلاك فقط، والمالك يرى الكل
+export function SidebarNav({ role }: { role: "OWNER" | "STAFF" }) {
   const pathname = usePathname();
+  const items = navItems.filter((item) => role === "OWNER" || !item.ownerOnly);
 
   return (
     <nav className="flex flex-col gap-1">
-      {navItems.map((item) => {
+      {items.map((item) => {
         const active =
           pathname === item.href || pathname.startsWith(item.href + "/");
         return (

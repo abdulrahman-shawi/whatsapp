@@ -16,6 +16,9 @@ export async function GET() {
 export async function PUT(req: Request) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (ctx.role !== "OWNER") {
+    return NextResponse.json({ error: "التعديل للمالك فقط" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {

@@ -50,6 +50,7 @@ enum SenderType {
 
 // حالة حملة البث الجماعي
 enum BroadcastStatus {
+  QUEUED // مجدولة للإرسال في وقت مستقبلي
   SENDING
   SENT
   PARTIAL
@@ -107,7 +108,10 @@ model BroadcastCampaign {
   tag         String // تسمية الجمهور المستهدف
   body        String          @db.Text // نص الحملة (معاينة القالب إن وُجد)
   templateId  String? // قالب ميتا اختياري
+  params      String[]        @default([]) // قيم المتغيرات {{1}} {{2}}... على مستوى الحملة — تدعم {{name}} للتخصيص لكل عميل
   status      BroadcastStatus @default(SENDING)
+  scheduledAt DateTime? // موعد الإرسال المجدول — null تعني الإرسال الفوري
+  sentAt      DateTime? // وقت إتمام/محاولة الإرسال
   totalCount  Int             @default(0)
   sentCount   Int             @default(0)
   failedCount Int             @default(0)

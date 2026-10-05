@@ -2,7 +2,9 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getWorkspaceContext } from "@/lib/session";
 import { SidebarNav } from "@/components/sidebar-nav";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { LogoutButton } from "@/components/logout-button";
 
 // هيكل لوحة التحكم: يتطلب جلسة، ويعرض شريطاً جانبياً (يمين في RTL)
@@ -14,9 +16,12 @@ export default async function DashboardLayout({
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) redirect("/login");
 
-  // اسم أول مساحة عمل للمستخدم لعرضه في الشريط الجانبي
+  // مساحة العمل الحالية (حسب كوكي "ws") مع دور المستخدم فيها
+  const ctx = await getWorkspaceContext();
+  if (!ctx) redirect("/login");
+
   const membership = await prisma.workspaceMember.findFirst({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, workspaceId: ctx.workspaceId },
     include: { workspace: true },
   });
 
@@ -29,8 +34,9 @@ export default async function DashboardLayout({
             {membership?.workspace.name ?? "مساحة العمل"}
           </p>
         </div>
+        <WorkspaceSwitcher currentWorkspaceId={ctx.workspaceId} />
         <div className="flex-1">
-          <SidebarNav />
+          <SidebarNav role={ctx.role} />
         </div>
         <div className="border-t pt-3">
           <p className="mb-2 truncate px-3 text-xs text-muted-foreground">

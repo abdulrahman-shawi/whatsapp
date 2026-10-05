@@ -9,6 +9,9 @@ export async function DELETE(
 ) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (ctx.role !== "OWNER") {
+    return NextResponse.json({ error: "الحذف للمالك فقط" }, { status: 403 });
+  }
 
   const existing = await prisma.template.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },

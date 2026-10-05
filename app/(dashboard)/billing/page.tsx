@@ -22,6 +22,7 @@ function adminEmails(): string[] {
 export default async function BillingPage() {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
+  if (ctx.role !== "OWNER") redirect("/inbox");
 
   await ensurePlansSeeded();
   const [currentPlan, usage, plans, user] = await Promise.all([

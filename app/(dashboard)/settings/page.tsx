@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
+  if (ctx.role !== "OWNER") redirect("/inbox");
 
   // القيم المقنّعة فقط — لا تصل الأسرار الخام إلى المتصفح أبداً
   const [integrations, templates, memberships, invites] = await Promise.all([

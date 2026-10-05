@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, CheckCheck, Inbox as InboxIcon } from "lucide-react";
+import { Archive, CheckCheck, Inbox as InboxIcon, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -139,8 +139,15 @@ export function ConversationList({
                   {c.platform === "WIDGET" && (
                     <Badge variant="outline">من الموقع</Badge>
                   )}
-                  {c.assignedTo && (
-                    <Badge variant="outline">{c.assignedTo.name}</Badge>
+                  {c.assignees.length > 0 && (
+                    <span className="flex items-center gap-1" title={c.assignees.map((a) => a.name).join("، ")}>
+                      <UserRound className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      {c.assignees.map((a) => (
+                        <Badge key={a.id} variant="outline">
+                          {a.name}
+                        </Badge>
+                      ))}
+                    </span>
                   )}
                 </div>
               </button>

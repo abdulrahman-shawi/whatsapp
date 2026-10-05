@@ -21,9 +21,10 @@ export async function PATCH(
   const data: {
     status?: (typeof STATUSES)[number];
     isArchived?: boolean;
-    assignedToId?: string | null;
     closedAt?: Date | null;
   } = {};
+  // مصفوفة المسند إليهم الجديدة — تُعالج بعد تحديث المحادثة في معاملة مستقلة
+  let assigneeIds: string[] | null = null;
   if (body.status !== undefined) {
     if (!STATUSES.includes(body.status)) {
       return NextResponse.json({ error: "حالة غير صالحة" }, { status: 400 });
@@ -36,25 +37,26 @@ export async function PATCH(
     }
     data.isArchived = body.isArchived;
   }
-  if (body.assignedToId !== undefined) {
-    // null لإلغاء الإسناد، وإلا يجب أن يكون العضو عضواً فعلياً في مساحة العمل
-    if (body.assignedToId !== null) {
-      if (typeof body.assignedToId !== "string") {
-        return NextResponse.json({ error: "مسند غير صالح" }, { status: 400 });
-      }
-      const membership = await prisma.workspaceMember.findFirst({
-        where: { userId: body.assignedToId, workspaceId: ctx.workspaceId },
-      });
-      if (!membership) {
-        return NextResponse.json(
-          { error: "المستخدم ليس عضواً في مساحة العمل" },
-          { status: 400 }
-        );
-      }
-      data.assignedToId = body.assignedToId;
-    } else {
-      data.assignedToId = null;
+  if (body.assignedToIds !== undefined) {
+    // مصفوفة فارغة تعني إلغاء الإسناد كله؛ وكل معرف يجب أن يكون عضواً في مساحة العمل
+    if (!Array.isArray(body.assignedToIds)) {
+      return NextResponse.json({ error: "قائمة الإسناد غير صالحة" }, { status: 400 });
     }
+    const rawIds: unknown[] = body.assignedToIds;
+    if (rawIds.some((id) => typeof id !== "string" || !id)) {
+      return NextResponse.json({ error: "معرف مسند غير صالح" }, { status: 400 });
+    }
+    const ids = [...new Set(rawIds as string[])];
+    const memberships = await prisma.workspaceMember.findMany({
+      where: { userId: { in: ids }, workspaceId: ctx.workspaceId },
+    });
+    if (memberships.length !== ids.length) {
+      return NextResponse.json(
+        { error: "أحد المستخدمين ليس عضواً في مساحة العمل" },
+        { status: 400 }
+      );
+    }
+    assigneeIds = ids;
   }
   if (body.closed !== undefined) {
     if (typeof body.closed !== "boolean") {
@@ -62,7 +64,7 @@ export async function PATCH(
     }
     data.closedAt = body.closed ? new Date() : null;
   }
-  if (Object.keys(data).length === 0) {
+  if (Object.keys(data).length === 0 && assigneeIds === null) {
     return NextResponse.json({ error: "لا يوجد ما يُحدَّث" }, { status: 400 });
   }
 
@@ -78,6 +80,25 @@ export async function PATCH(
     where: { id: params.id },
     data,
   });
+
+  // استبدال الإسنادات بالقائمة الجديدة (إن وُجدت) — حذف ثم إنشاء ذريّان
+  if (assigneeIds !== null) {
+    await prisma.$transaction([
+      prisma.conversationAssignee.deleteMany({
+        where: { conversationId: params.id },
+      }),
+      ...(assigneeIds.length > 0
+        ? [
+            prisma.conversationAssignee.createMany({
+              data: assigneeIds.map((userId) => ({
+                conversationId: params.id,
+                userId,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+  }
 
   // إشعار باقي الفريق فوراً بتحديث المحادثة (إسناد/إغلاق/...) — أفضل-جهد
   triggerConversationUpdated(ctx.workspaceId, params.id);

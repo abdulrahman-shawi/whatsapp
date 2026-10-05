@@ -24,7 +24,8 @@ export type ConversationListItem = {
   platform: Platform;
   isArchived: boolean;
   agentId: string | null;
-  assignedTo: MemberInfo | null;
+  // الموظفون المسند إليهم المحادثة (قد يكون أكثر من واحد)
+  assignees: MemberInfo[];
   closedAt: string | null;
   lastMessageAt: string;
   contact: ContactInfo;

@@ -26,9 +26,9 @@ export async function getWorkspaceConversations(
         ? { isArchived: false, closedAt: { not: null } }
         : { isArchived: false, closedAt: null }),
     ...(filter === "mine" && userId
-      ? { assignedToId: userId }
+      ? { assignees: { some: { userId } } }
       : filter === "unassigned"
-        ? { assignedToId: null }
+        ? { assignees: { none: {} } }
         : {}),
   };
 
@@ -40,7 +40,10 @@ export async function getWorkspaceConversations(
       contact: {
         select: { id: true, name: true, waPhone: true, tags: true, notes: true },
       },
-      assignedTo: { select: { id: true, name: true } },
+      assignees: {
+        include: { user: { select: { id: true, name: true } } },
+        orderBy: { assignedAt: "asc" },
+      },
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
       _count: {
         select: {
@@ -58,7 +61,8 @@ export async function getWorkspaceConversations(
     platform: c.platform,
     isArchived: c.isArchived,
     agentId: c.agentId,
-    assignedTo: c.assignedTo,
+    // الموظفون المسند إليهم المحادثة (قد يكون أكثر من واحد)
+    assignees: c.assignees.map((a) => a.user),
     closedAt: c.closedAt ? c.closedAt.toISOString() : null,
     lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),
     contact: c.contact,

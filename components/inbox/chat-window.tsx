@@ -38,7 +38,8 @@ type Props = {
   onSendTemplate: (templateId: string, params: string[]) => void;
   onToggleStatus: () => void;
   onToggleArchive: () => void;
-  onAssign: (userId: string | null) => void;
+  // استبدال قائمة المسند إليهم بالكامل (مصفوفة فارغة = إلغاء الإسناد)
+  onAssign: (userIds: string[]) => void;
   onToggleClosed: () => void;
 };
 
@@ -71,6 +72,7 @@ export function ChatWindow({
   const [suggesting, setSuggesting] = useState(false);
   const [isNoteMode, setIsNoteMode] = useState(false);
   const [sendingMedia, setSendingMedia] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   // منتقي القوالب
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -90,6 +92,7 @@ export function ChatWindow({
     setSelectedTemplate(null);
     setTemplateParams({});
     setTemplatePickerOpen(false);
+    setAssignOpen(false);
   }, [conversation.id]);
 
   // التمرير لأسفل عند وصول رسائل جديدة
@@ -233,23 +236,75 @@ export function ChatWindow({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* إسناد المحادثة لعضو في الفريق */}
+          {/* إسناد المحادثة لأعضاء الفريق — تحديد متعدد من قائمة منسدلة */}
           <div className="relative">
-            <User className="pointer-events-none absolute start-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <select
-              value={conversation.assignedTo?.id ?? ""}
-              onChange={(e) => onAssign(e.target.value || null)}
-              title="إسناد المحادثة"
-              className="max-w-36 appearance-none rounded-md border bg-background py-1.5 ps-7 pe-2 text-sm"
+            <Button
+              variant="outline"
+              size="sm"
+              title="إسناد المحادثة لموظفين"
+              onClick={() => setAssignOpen((v) => !v)}
             >
-              <option value="">غير مسندة</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                  {m.id === currentUserId ? " (أنا)" : ""}
-                </option>
-              ))}
-            </select>
+              <User className="h-4 w-4" />
+              {conversation.assignees.length > 0 ? (
+                <span className="max-w-32 truncate">
+                  {conversation.assignees.map((a) => a.name).join("، ")}
+                </span>
+              ) : (
+                "إسناد"
+              )}
+            </Button>
+            {assignOpen && (
+              <>
+                {/* خلفية شفافة لإغلاق القائمة عند النقر خارجها */}
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setAssignOpen(false)}
+                />
+                <div className="absolute end-0 top-full z-20 mt-1 w-56 rounded-md border bg-background p-1 shadow-lg">
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    المسند إليهم ({conversation.assignees.length})
+                  </p>
+                  {members.map((m) => {
+                    const checked = conversation.assignees.some(
+                      (a) => a.id === m.id
+                    );
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          const current = conversation.assignees.map(
+                            (a) => a.id
+                          );
+                          onAssign(
+                            checked
+                              ? current.filter((id) => id !== m.id)
+                              : [...current, m.id]
+                          );
+                        }}
+                        className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <span className="truncate">
+                          {m.name}
+                          {m.id === currentUserId ? " (أنا)" : ""}
+                        </span>
+                        {checked && (
+                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                        )}
+                      </button>
+                    );
+                  })}
+                  {conversation.assignees.length > 0 && (
+                    <button
+                      onClick={() => onAssign([])}
+                      className="flex w-full items-center rounded-sm border-t px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                    >
+                      <X className="me-1 h-4 w-4" />
+                      إلغاء الإسناد
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* إغلاق / إعادة فتح المحادثة */}

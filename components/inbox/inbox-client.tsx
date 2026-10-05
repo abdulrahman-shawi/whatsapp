@@ -204,13 +204,13 @@ export function InboxClient({
     refreshList();
   }
 
-  // إسناد المحادثة لعضو في الفريق أو إلغاء إسنادها (null)
-  async function handleAssign(userId: string | null) {
+  // استبدال قائمة المسند إليهم بالكامل (مصفوفة فارغة = إلغاء الإسناد كله)
+  async function handleAssign(userIds: string[]) {
     if (!selected) return;
     await fetch(`/api/conversations/${selected.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assignedToId: userId }),
+      body: JSON.stringify({ assignedToIds: userIds }),
     });
     refreshList();
   }

@@ -337,6 +337,14 @@ export default async function GuidePage() {
               أثناء التطوير المحلي لن تصلك طلبات Meta على localhost — استخدم
               نفقاً مثل ngrok وضع رابطه مؤقتاً في Callback URL.
             </Callout>
+            <Callout>
+              أكثر من عميل/مساحة عمل على نفس المنصة؟ أضف أرقامهم من «Add phone
+              number» ثم اكتب معرّف كل رقم (WHATSAPP_PHONE_NUMBER_ID) في
+              إعدادات مساحة العمل الخاصة به — يوجّه النظام كل رسالة
+              تلقائياً لمساحتها عبر معرّف الرقم. لمزود UltraMsg ألحق{" "}
+              <code dir="ltr">?instanceId=...</code> برابط الويب هوك في إعدادات
+              النسخة.
+            </Callout>
           </div>
         </CardContent>
       </Card>

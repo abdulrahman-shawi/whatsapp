@@ -1,14 +1,27 @@
 import crypto from "crypto";
 import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
-import { getIntegrationCandidates } from "@/lib/settings";
+import {
+  getIntegrationCandidates,
+  resolveWorkspaceByPhoneNumberId,
+} from "@/lib/settings";
 
 // أنواع مبسطة لبنية حمولة ميتا التي نحتاجها
+interface MetaMedia {
+  id?: string;
+  mime_type?: string;
+  caption?: string;
+}
 interface MetaMessage {
   from: string;
   type: string;
   text?: { body?: string };
+  image?: MetaMedia;
+  document?: MetaMedia;
+  audio?: MetaMedia;
+  video?: MetaMedia;
 }
 interface MetaValue {
+  metadata?: { phone_number_id?: string };
   contacts?: { profile?: { name?: string } }[];
   messages?: MetaMessage[];
 }
@@ -20,7 +33,7 @@ export async function GET(req: Request) {
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  // MVP أحادي المستأجر: نقبل التوكن من .env أو من إعدادات أي مساحة عمل
+  // نقبل التوكن من .env أو من إعدادات أي مساحة عمل
   const validTokens = await getIntegrationCandidates("WHATSAPP_VERIFY_TOKEN");
   if (mode === "subscribe" && token && validTokens.includes(token) && challenge) {
     return new Response(challenge, {
@@ -57,13 +70,12 @@ async function verifySignature(
   return false;
 }
 
-// نص بديل لأنواع الرسائل غير النصية
+// أنواع الوسائط التي نخزن معرّفها بدل النص فقط
+const MEDIA_TYPES = ["image", "document", "audio", "video"] as const;
+
+// نص بديل لأنواع الرسائل التي لا نستخرج منها محتوى
 function placeholderFor(type: string): string {
   const map: Record<string, string> = {
-    image: "[صورة]",
-    video: "[مقطع فيديو]",
-    audio: "[رسالة صوتية]",
-    document: "[مستند]",
     sticker: "[ملصق]",
     location: "[موقع]",
   };
@@ -94,15 +106,43 @@ export async function POST(req: Request) {
       const value = change.value;
       if (!value?.messages) continue;
       const profileName = value.contacts?.[0]?.profile?.name ?? null;
+
+      // توجيه الرسائل لمساحة العمل المالكة لهذا الرقم (multi-tenant)
+      const phoneNumberId = value.metadata?.phone_number_id;
+      const workspaceId = phoneNumberId
+        ? await resolveWorkspaceByPhoneNumberId(phoneNumberId)
+        : null;
+      if (!workspaceId) {
+        console.warn(
+          `[webhook] لم تُعثر على مساحة عمل لرقم ${phoneNumberId ?? "(غير معروف)"} — سيُستخدم الاحتياط الأحادي`
+        );
+      }
+
       for (const msg of value.messages) {
-        const text =
-          msg.type === "text" ? msg.text?.body ?? "" : placeholderFor(msg.type);
-        if (!text) continue;
+        // رسالة وسائط: نخزن معرّف وسيط ميتا ونوعه وصيغته مع التسمية التوضيحية
+        const mediaType = MEDIA_TYPES.find((t) => msg[t]?.id);
+        const media = mediaType ? msg[mediaType] : undefined;
+
+        const text = media
+          ? (media.caption ?? `[${mediaType === "image" ? "صورة" : mediaType === "document" ? "مستند" : mediaType === "audio" ? "رسالة صوتية" : "مقطع فيديو"}]`)
+          : msg.type === "text"
+            ? msg.text?.body ?? ""
+            : placeholderFor(msg.type);
+        if (!text && !mediaType) continue;
+
         tasks.push(
           handleIncomingWhatsAppMessage({
             waPhone: msg.from,
             contactName: profileName,
             text,
+            workspaceId: workspaceId ?? undefined,
+            media: media?.id
+              ? {
+                  mediaId: media.id,
+                  mediaMime: media.mime_type ?? null,
+                  mediaType: mediaType ?? null,
+                }
+              : undefined,
           })
         );
       }

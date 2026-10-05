@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, Bot, Hand, MessagesSquare, UserCheck } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { getUsageStatus } from "@/lib/billing/plans";
 import {
   Card,
   CardContent,
@@ -12,22 +13,14 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// مفتاح الشهر الحالي بصيغة "2025-01"
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7);
-}
-
 // صفحة الاستهلاك: رصيد الرسائل الشهري وإحصاءات المحادثات
 export default async function UsagePage() {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
 
-  const month = currentMonth();
-
-  const [usage, history, grouped] = await Promise.all([
-    prisma.usageRecord.findUnique({
-      where: { workspaceId_month: { workspaceId: ctx.workspaceId, month } },
-    }),
+  const [usageStatus, history, grouped] = await Promise.all([
+    // الحد من الباقة الفعلية للمساحة
+    getUsageStatus(ctx.workspaceId),
     // سجلات آخر ٦ أشهر إن وجدت
     prisma.usageRecord.findMany({
       where: { workspaceId: ctx.workspaceId },
@@ -42,10 +35,10 @@ export default async function UsagePage() {
     }),
   ]);
 
-  const used = usage?.messagesUsed ?? 0;
-  const limit = usage?.messageLimit ?? 1000;
-  const remaining = Math.max(limit - used, 0);
-  const percent = Math.min(Math.round((used / limit) * 100), 100);
+  const used = usageStatus.used;
+  const limit = usageStatus.limit;
+  const remaining = usageStatus.remaining;
+  const percent = usageStatus.percent;
 
   const countOf = (status: string) =>
     grouped.find((g) => g.status === status)?._count ?? 0;

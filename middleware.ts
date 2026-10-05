@@ -10,9 +10,11 @@ export default withAuth({
 export const config = {
   matcher: [
     "/inbox/:path*",
+    "/broadcast/:path*",
     "/agents/:path*",
     "/widget/:path*",
     "/usage/:path*",
+    "/billing/:path*",
     "/settings/:path*",
   ],
 };

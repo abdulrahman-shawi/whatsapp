@@ -108,6 +108,30 @@ export async function getIntegrationCandidates(key: IntegrationKey): Promise<str
   return [...values];
 }
 
+// حل مساحة العمل المالكة لمعرّف رقم واتساب (phone_number_id) —
+// يستخدمه ويب هوك ميتا لتوجيه الرسالة للمساحة الصحيحة (multi-tenant)
+export async function resolveWorkspaceByPhoneNumberId(
+  phoneNumberId: string
+): Promise<string | null> {
+  const row = await prisma.setting.findFirst({
+    where: { key: "WHATSAPP_PHONE_NUMBER_ID", value: phoneNumberId },
+    select: { workspaceId: true },
+  });
+  return row?.workspaceId ?? null;
+}
+
+// حل مساحة العمل المالكة لمعرّف نسخة UltraMsg —
+// يستخدمه ويب هوك UltraMsg (يُمرَّر عبر ?instanceId= في رابط الويب هوك)
+export async function resolveWorkspaceByUltraMsgInstance(
+  instanceId: string
+): Promise<string | null> {
+  const row = await prisma.setting.findFirst({
+    where: { key: "ULTRAMSG_INSTANCE_ID", value: instanceId },
+    select: { workspaceId: true },
+  });
+  return row?.workspaceId ?? null;
+}
+
 // إخفاء السر — نظهر آخر ٤ أحرف فقط
 function mask(value: string): string {
   return value.length <= 4 ? "••••" : "••••••••" + value.slice(-4);

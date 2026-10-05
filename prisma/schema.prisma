@@ -48,6 +48,14 @@ enum SenderType {
   CUSTOMER
 }
 
+// حالة حملة البث الجماعي
+enum BroadcastStatus {
+  SENDING
+  SENT
+  PARTIAL
+  FAILED
+}
+
 // المستخدم: حساب الدخول للمنصة
 model User {
   id           String            @id @default(cuid())
@@ -56,6 +64,8 @@ model User {
   passwordHash String
   createdAt    DateTime          @default(now())
   memberships  WorkspaceMember[]
+  assignedConversations Conversation[] // المحادثات المسندة إليه
+  sentMessages  Message[] // الرسائل (الملاحظات الداخلية) التي أرسلها
 }
 
 // مساحة العمل: الكيان التجاري الذي يملك الوكلاء والمحادثات
@@ -69,6 +79,51 @@ model Workspace {
   conversations Conversation[]
   usage      UsageRecord[]
   settings   Setting[]
+  templates  Template[]
+  invites    WorkspaceInvite[]
+  broadcasts BroadcastCampaign[]
+  planId     String?
+  plan       Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
+}
+
+// باقة الاشتراك: حدود رسائل وأعضاء ووكلاء لكل مساحة عمل
+// التفعيل يدوي في المرحلة الحالية — لاحقاً: Stripe Checkout/webhook يحدّث workspace.planId
+model Plan {
+  id            String      @id @default(cuid())
+  code          String      @unique // STARTER | PRO | BUSINESS
+  name          String // الاسم المعروض
+  priceMonthly  Int // بالدولار — للعرض فقط في المرحلة اليدوية
+  messageLimit  Int // حد الرسائل الشهري
+  maxMembers    Int         @default(2)
+  maxAgents     Int         @default(1)
+  sortOrder     Int         @default(0)
+  workspaces    Workspace[]
+}
+
+// حملة بث جماعي: رسالة واحدة لكل جهات الاتصال الحاملة لتسمية معينة
+model BroadcastCampaign {
+  id          String          @id @default(cuid())
+  workspaceId String
+  tag         String // تسمية الجمهور المستهدف
+  body        String          @db.Text // نص الحملة (معاينة القالب إن وُجد)
+  templateId  String? // قالب ميتا اختياري
+  status      BroadcastStatus @default(SENDING)
+  totalCount  Int             @default(0)
+  sentCount   Int             @default(0)
+  failedCount Int             @default(0)
+  createdById String?
+  createdAt   DateTime        @default(now())
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// دعوة انضمام لمرة واحدة: ينشئها المالك ويرسل الرابط للموظف
+model WorkspaceInvite {
+  id          String      @id @default(cuid())
+  token       String      @unique
+  workspaceId String
+  role        MemberRole  @default(STAFF)
+  createdAt   DateTime    @default(now())
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // عضوية المستخدم في مساحة عمل مع دوره
@@ -135,11 +190,14 @@ model Conversation {
   platform      Platform           @default(WHATSAPP)
   status        ConversationStatus @default(AI)
   isArchived    Boolean            @default(false)
+  assignedToId  String? // المسند إليه — null تعني غير مسندة
+  closedAt      DateTime? // وجود قيمة تعني محادثة مغلقة (تختفي من الوارد)
   lastMessageAt DateTime?
   createdAt     DateTime           @default(now())
   workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact       Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
   agent         Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  assignedTo    User?              @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
   messages      Message[]
 }
 
@@ -150,10 +208,17 @@ model Message {
   direction      MessageDirection
   body           String           @db.Text
   senderType     SenderType
+  isNote         Boolean          @default(false) // ملاحظة داخلية لا تُرسل للعميل
+  senderId       String? // كاتب الملاحظة (موظف) — اختياري
+  // وسائط واتساب (مزود ميتا): معرّف وسيط ميتا ونوعه وصيغته — body يحمل التسمية التوضيحية
+  mediaId        String?
+  mediaMime      String?
+  mediaType      String? // image | document | audio | video
   isRead         Boolean          @default(false)
   rating         String? // تقييم رد الذكاء الاصطناعي: GOOD أو NEEDS_IMPROVEMENT (صفحة التدريب)
   createdAt      DateTime         @default(now())
   conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?            @relation(fields: [senderId], references: [id], onDelete: SetNull)
 }
 
 // سجل الاستهلاك الشهري لكل مساحة عمل (لحدود الباقة)
@@ -176,4 +241,15 @@ model Setting {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, key])
+}
+
+// قالب رسالة واتساب معتمد في ميتا — يُرسل خارج نافذة ٢٤ ساعة
+model Template {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String // اسم القالب كما هو معتمد في ميتا
+  language    String    @default("ar")
+  body        String    @db.Text // نص معاينة يحتوي متغيرات {{1}} {{2}}...
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }

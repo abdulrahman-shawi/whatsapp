@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
+import {
+  resolveWhatsAppCreds,
+  sendWhatsAppMessage,
+  sendWhatsAppTemplate,
+} from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 
 type Params = { params: { id: string } };
@@ -12,10 +16,27 @@ function serialize(m: {
   direction: string;
   body: string;
   senderType: string;
+  isNote: boolean;
   isRead: boolean;
+  mediaId: string | null;
+  mediaMime: string | null;
+  mediaType: string | null;
   createdAt: Date;
+  sender?: { name: string } | null;
 }) {
-  return { ...m, createdAt: m.createdAt.toISOString() };
+  return {
+    id: m.id,
+    direction: m.direction,
+    body: m.body,
+    senderType: m.senderType,
+    isNote: m.isNote,
+    isRead: m.isRead,
+    mediaId: m.mediaId,
+    mediaMime: m.mediaMime,
+    mediaType: m.mediaType,
+    createdAt: m.createdAt.toISOString(),
+    senderName: m.sender?.name ?? null,
+  };
 }
 
 // جلب رسائل المحادثة (تصاعدياً) — ?since= للاستطلاع التزايدي
@@ -50,19 +71,56 @@ export async function GET(req: Request, { params }: Params) {
       ...(since ? { createdAt: { gt: since } } : {}),
     },
     orderBy: { createdAt: "asc" },
+    include: { sender: { select: { name: true } } },
   });
 
   return NextResponse.json({ messages: messages.map(serialize) });
 }
 
 // إرسال رسالة يدوية من الموظف — وتحاول الإرسال عبر واتساب لمحادثات WHATSAPP
+// isNote=true تحفظ ملاحظة داخلية فقط ولا تُرسل للعميل
+// template={id, params} يرسل قالباً معتمداً في ميتا بدل رسالة نصية حرة
 export async function POST(req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   const text = body?.body;
-  if (typeof text !== "string" || !text.trim()) {
+  const isNote = body?.isNote === true;
+  const templateReq = body?.template;
+
+  // وضع القالب: التحقق من المدخلات وجلب القالب من مساحة العمل
+  let template: { name: string; language: string; body: string } | null = null;
+  let paramsList: string[] = [];
+  if (templateReq && typeof templateReq === "object") {
+    if (isNote) {
+      return NextResponse.json(
+        { error: "الملاحظات الداخلية نصية فقط" },
+        { status: 400 }
+      );
+    }
+    template = await prisma.template.findFirst({
+      where: { id: templateReq.id, workspaceId: ctx.workspaceId },
+    });
+    if (!template) {
+      return NextResponse.json({ error: "القالب غير موجود" }, { status: 404 });
+    }
+    paramsList = Array.isArray(templateReq.params)
+      ? templateReq.params.map(String)
+      : [];
+  }
+
+  // نص المعاينة المخزن: استبدال متغيرات القالب {{1}} {{2}}... بقيمها
+  const preview = template
+    ? template.body.replace(/\{\{(\d+)\}\}/g, (_, n) => {
+        const idx = parseInt(n, 10) - 1;
+        return paramsList[idx] ?? `{{${n}}}`;
+      })
+    : "";
+
+  const bodyText =
+    typeof text === "string" && text.trim() ? text.trim() : preview;
+  if (!bodyText) {
     return NextResponse.json({ error: "نص الرسالة مطلوب" }, { status: 400 });
   }
 
@@ -79,7 +137,9 @@ export async function POST(req: Request, { params }: Params) {
       conversationId: params.id,
       direction: "OUTBOUND",
       senderType: "HUMAN",
-      body: text.trim(),
+      body: bodyText,
+      isNote,
+      senderId: ctx.userId,
     },
   });
   await prisma.conversation.update({
@@ -93,14 +153,18 @@ export async function POST(req: Request, { params }: Params) {
 
   // الإرسال الخارجي لواتساب فقط — الفشل لا يمنع حفظ الرسالة
   // بيانات الاعتماد من إعدادات مساحة العمل مع .env كبديل
+  // الملاحظات الداخلية لا تُرسل أبداً
   let waSent: boolean | null = null;
-  if (conversation.platform === "WHATSAPP") {
+  if (!isNote && conversation.platform === "WHATSAPP") {
     const creds = await resolveWhatsAppCreds(ctx.workspaceId);
-    waSent = await sendWhatsAppMessage(
-      conversation.contact.waPhone,
-      text.trim(),
-      creds
-    );
+    // القوالب ترسل عبر واجهة القوالب (خارج نافذة ٢٤ ساعة) — مزود ميتا فقط
+    waSent = template
+      ? await sendWhatsAppTemplate(
+          conversation.contact.waPhone,
+          { name: template.name, language: template.language, params: paramsList },
+          creds
+        )
+      : await sendWhatsAppMessage(conversation.contact.waPhone, bodyText, creds);
   }
 
   return NextResponse.json(

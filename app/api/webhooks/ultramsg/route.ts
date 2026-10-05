@@ -1,4 +1,5 @@
 import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
+import { resolveWorkspaceByUltraMsgInstance } from "@/lib/settings";
 
 // ننتظر المعالجة كاملة (تأخير الرد + OpenAI) — نحتاج مهلة أطول من الافتراضية
 export const maxDuration = 60;
@@ -29,6 +30,7 @@ function placeholderFor(type: string): string {
 
 // استقبال الرسائل الواردة من UltraMsg
 // يُضبط رابط هذا الويب هوك في إعدادات النسخة (instance) في لوحة UltraMsg
+// مع إلحاق ?instanceId= بعنوانه لتحديد مساحة العمل المالكة (multi-tenant)
 export async function POST(req: Request) {
   const payload = (await req.json().catch(() => null)) as {
     event_type?: string;
@@ -49,6 +51,15 @@ export async function POST(req: Request) {
     return new Response("OK", { status: 200 });
   }
 
+  // توجيه الرسالة لمساحة العمل المالكة للنسخة — الاحتياط: السلوك القديم
+  const instanceId = new URL(req.url).searchParams.get("instanceId");
+  const workspaceId = instanceId
+    ? await resolveWorkspaceByUltraMsgInstance(instanceId)
+    : null;
+  if (instanceId && !workspaceId) {
+    console.warn(`[ultramsg-webhook] لم تُعثر على مساحة عمل للنسخة ${instanceId}`);
+  }
+
   const text =
     data.type === "chat" || !data.type
       ? data.body ?? ""
@@ -62,6 +73,7 @@ export async function POST(req: Request) {
         waPhone,
         contactName: data.pushname ?? data.name ?? null,
         text,
+        workspaceId: workspaceId ?? undefined,
       });
     } catch (e) {
       console.error("[ultramsg-webhook] خطأ أثناء المعالجة:", e);

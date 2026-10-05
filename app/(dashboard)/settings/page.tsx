@@ -3,8 +3,11 @@ import Link from "next/link";
 import { BookOpen, ChevronLeft } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/session";
 import { getIntegrationList } from "@/lib/settings";
+import { prisma } from "@/lib/prisma";
 import { Card } from "@/components/ui/card";
 import { IntegrationsForm } from "@/components/settings/integrations-form";
+import { TemplatesForm } from "@/components/settings/templates-form";
+import { MembersForm } from "@/components/settings/members-form";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +17,22 @@ export default async function SettingsPage() {
   if (!ctx) redirect("/login");
 
   // القيم المقنّعة فقط — لا تصل الأسرار الخام إلى المتصفح أبداً
-  const integrations = await getIntegrationList(ctx.workspaceId);
+  const [integrations, templates, memberships, invites] = await Promise.all([
+    getIntegrationList(ctx.workspaceId),
+    prisma.template.findMany({
+      where: { workspaceId: ctx.workspaceId },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.workspaceMember.findMany({
+      where: { workspaceId: ctx.workspaceId },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { user: { name: "asc" } },
+    }),
+    prisma.workspaceInvite.findMany({
+      where: { workspaceId: ctx.workspaceId },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -46,6 +64,40 @@ export default async function SettingsPage() {
       </Link>
 
       <IntegrationsForm integrations={integrations} />
+
+      {/* فريق العمل: دعوات وأعضاء وأدوار */}
+      <div>
+        <h2 className="text-lg font-semibold">فريق العمل</h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          دعوات لمرة واحدة عبر الرابط — ينشئ المدعو حسابه وينضم مباشرة لمساحة
+          العمل
+        </p>
+        <MembersForm
+          initialMembers={memberships.map((m) => ({
+            userId: m.user.id,
+            name: m.user.name,
+            email: m.user.email,
+            role: m.role,
+          }))}
+          initialInvites={invites.map((i) => ({
+            id: i.id,
+            token: i.token,
+            role: i.role,
+          }))}
+          currentUserId={ctx.userId}
+          myRole={ctx.role}
+        />
+      </div>
+
+      {/* قوالب رسائل واتساب المعتمدة */}
+      <div>
+        <h2 className="text-lg font-semibold">قوالب رسائل واتساب</h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          القوالب المعتمدة في لوحة Meta Business — تُرسل من صندوق الوارد (زر
+          "قالب") للمراسلة خارج نافذة ٢٤ ساعة
+        </p>
+        <TemplatesForm initialTemplates={templates} />
+      </div>
     </div>
   );
 }

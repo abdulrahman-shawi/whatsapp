@@ -4,6 +4,7 @@ import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { retrieveRelevantKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { getUsageStatus } from "@/lib/billing/plans";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -35,6 +36,7 @@ type PipelineOptions = {
   text: string;
   platform: "WHATSAPP" | "WIDGET";
   conversationId?: string;
+  media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
   sendReply: (to: string, body: string) => Promise<unknown>;
 };
 
@@ -87,11 +89,20 @@ async function runPipeline(
       direction: "INBOUND",
       senderType: "CUSTOMER",
       body: text,
+      // وسائط واتساب الواردة: معرّف وسيط ميتا ونوعه وصيغته
+      ...(opts.media
+        ? {
+            mediaId: opts.media.mediaId,
+            mediaMime: opts.media.mediaMime,
+            mediaType: opts.media.mediaType,
+          }
+        : {}),
     },
   });
+  // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { lastMessageAt: new Date() },
+    data: { lastMessageAt: new Date(), closedAt: null },
   });
 
   // بث فوري لصندوق الوارد — لا يؤثر على شيء إن لم يكن Pusher مفعّلاً
@@ -121,6 +132,20 @@ async function runPipeline(
   // ٧. تحكم بشري (يدوي أو مسلّم) — نتوقف دون رد
   if (conversation.status !== "AI") {
     return { conversationId: conversation.id, reply: null, status: conversation.status };
+  }
+
+  // ٧.ب حد الباقة: استنفاد الرصيد الشهري يوقف الرد الآلي ويسلّم المحادثة للفريق
+  // (الرسائل اليدوية البشرية غير محدودة ولا تُحتسب)
+  const usage = await getUsageStatus(workspaceId);
+  if (usage.remaining <= 0) {
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { status: "HANDED_OFF" },
+    });
+    console.warn(
+      `[agent-engine] استنفاد رصيد الباقة للمساحة ${workspaceId} (${usage.used}/${usage.limit}) — أُوقف الرد الآلي وسُلّمت المحادثة`
+    );
+    return { conversationId: conversation.id, reply: null, status: "HANDED_OFF" };
   }
 
   // ٨. الرد الآلي — انتظار بسيط يجمع الرسائل المتتابعة (MVP)
@@ -192,21 +217,28 @@ async function storeInboundWithoutAgent(input: {
   waPhone: string;
   contactName: string | null;
   text: string;
+  workspaceId?: string;
+  media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
 }): Promise<void> {
-  // MVP أحادي المستأجر: نختار أول مساحة عمل
-  const workspace = await prisma.workspace.findFirst();
-  if (!workspace) {
-    console.log("[agent-engine] لا توجد مساحة عمل — تم تجاهل الرسالة");
-    return;
+  // Multi-tenant: نستخدم مساحة العمل المحلولة من رقم الهاتف،
+  // وإن تعذّرت نعود لأول مساحة عمل (سلوك احتياطي قديم)
+  let workspaceId = input.workspaceId;
+  if (!workspaceId) {
+    const workspace = await prisma.workspace.findFirst();
+    if (!workspace) {
+      console.log("[agent-engine] لا توجد مساحة عمل — تم تجاهل الرسالة");
+      return;
+    }
+    workspaceId = workspace.id;
   }
 
   const contact = await prisma.contact.upsert({
     where: {
-      workspaceId_waPhone: { workspaceId: workspace.id, waPhone: input.waPhone },
+      workspaceId_waPhone: { workspaceId, waPhone: input.waPhone },
     },
     update: input.contactName ? { name: input.contactName } : {},
     create: {
-      workspaceId: workspace.id,
+      workspaceId,
       waPhone: input.waPhone,
       name: input.contactName,
     },
@@ -218,7 +250,7 @@ async function storeInboundWithoutAgent(input: {
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: {
-        workspaceId: workspace.id,
+        workspaceId,
         contactId: contact.id,
         platform: "WHATSAPP",
         status: "MANUAL",
@@ -232,16 +264,25 @@ async function storeInboundWithoutAgent(input: {
       direction: "INBOUND",
       senderType: "CUSTOMER",
       body: input.text,
+      // وسائط واتساب الواردة: معرّف وسيط ميتا ونوعه وصيغته
+      ...(input.media
+        ? {
+            mediaId: input.media.mediaId,
+            mediaMime: input.media.mediaMime,
+            mediaType: input.media.mediaType,
+          }
+        : {}),
     },
   });
+  // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { lastMessageAt: new Date() },
+    data: { lastMessageAt: new Date(), closedAt: null },
   });
-  await incrementUsage(workspace.id);
+  await incrementUsage(workspaceId);
 
-  triggerNewMessage(workspace.id, conversation.id, msg);
-  triggerConversationUpdated(workspace.id, conversation.id);
+  triggerNewMessage(workspaceId, conversation.id, msg);
+  triggerConversationUpdated(workspaceId, conversation.id);
 }
 
 // نقطة دخول رسائل واتساب الواردة من الويب هوك
@@ -249,15 +290,28 @@ export async function handleIncomingWhatsAppMessage(input: {
   waPhone: string;
   contactName: string | null;
   text: string;
+  // مساحة العمل المحلولة من معرّف رقم الهاتف — غائبة في الاحتياط القديم
+  workspaceId?: string;
+  media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
 }): Promise<void> {
   try {
-    // MVP: رقم واتساب واحد لكل تثبيت — نختار أول وكيل نشط لأي مساحة عمل
-    // لاحقاً: ربط الرقم بمساحة عمل عبر WHATSAPP_PHONE_NUMBER_ID
-    const agent = await prisma.agent.findFirst({
-      where: { isActive: true },
-      include: { knowledgeSources: true },
-    });
+    // Multi-tenant: نبحث عن الوكيل النشط داخل مساحة العمل المالكة للرقم،
+    // وعند غيابها نعود لأول وكيل نشط (سلوك احتياطي قديم)
+    const agent = input.workspaceId
+      ? await prisma.agent.findFirst({
+          where: { isActive: true, workspaceId: input.workspaceId },
+          include: { knowledgeSources: true },
+        })
+      : await prisma.agent.findFirst({
+          where: { isActive: true },
+          include: { knowledgeSources: true },
+        });
     if (!agent) {
+      if (input.workspaceId) {
+        console.warn(
+          `[agent-engine] لا وكيل نشط في المساحة ${input.workspaceId} — تُخزن الرسالة يدوياً`
+        );
+      }
       // لا يوجد وكيل نشط — نحفظ الرسالة في صندوق الوارد دون رد آلي حتى لا تضيع
       await storeInboundWithoutAgent(input);
       return;
@@ -274,6 +328,7 @@ export async function handleIncomingWhatsAppMessage(input: {
       contactName: input.contactName,
       text: input.text,
       platform: "WHATSAPP",
+      media: input.media,
       sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),
     });
   } catch (e) {

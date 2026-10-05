@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Gauge, Settings } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
 const navItems = [
   { href: "/inbox", label: "الوارد", icon: Inbox },
+  { href: "/broadcast", label: "الحملات", icon: Megaphone },
   { href: "/agents", label: "الوكلاء", icon: Bot },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
   { href: "/usage", label: "الاستهلاك", icon: Gauge },
+  { href: "/billing", label: "الاشتراك", icon: CreditCard },
   { href: "/settings", label: "الإعدادات", icon: Settings },
 ];
 

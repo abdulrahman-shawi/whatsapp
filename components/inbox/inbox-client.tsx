@@ -6,17 +6,33 @@ import { getPusherInstance, initPusherClient, type Channel } from "@/lib/pusher-
 import { ConversationList } from "./conversation-list";
 import { ChatWindow } from "./chat-window";
 import { ContactPanel } from "./contact-panel";
-import type { ContactInfo, ConversationListItem, MessageItem } from "./types";
+import type {
+  AssignmentFilter,
+  ContactInfo,
+  ConversationListItem,
+  MemberInfo,
+  MessageItem,
+} from "./types";
+
+// نمط عرض القائمة: الوارد المفتوح / المؤرشفة / المغلقة
+export type ListView = "open" | "archived" | "closed";
 
 type Props = {
   initialConversations: ConversationListItem[];
+  members: MemberInfo[];
+  currentUserId: string;
 };
 
 // العميل الرئيسي لصندوق الوارد: يدير الحالة والاستطلاع الدوري
-export function InboxClient({ initialConversations }: Props) {
+export function InboxClient({
+  initialConversations,
+  members,
+  currentUserId,
+}: Props) {
   const [conversations, setConversations] =
     useState<ConversationListItem[]>(initialConversations);
-  const [showArchived, setShowArchived] = useState(false);
+  const [view, setView] = useState<ListView>("open");
+  const [filter, setFilter] = useState<AssignmentFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -26,16 +42,22 @@ export function InboxClient({ initialConversations }: Props) {
   // مرجع للمحادثة المفتوحة حالياً — تستخدمه معالجات Pusher
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
-  // مرجع لحالة عرض المؤرشفة — تستخدمه معالجات Pusher
-  const showArchivedRef = useRef(showArchived);
-  showArchivedRef.current = showArchived;
+  // مراجع لحالة العرض والفلتر — تستخدمها معالجات Pusher والاستطلاع
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
 
-  // تحديث قائمة المحادثات من الخادم
-  const refreshList = useCallback(async (archived: boolean) => {
+  // تحديث قائمة المحادثات من الخادم حسب نمط العرض والفلتر الحاليين
+  const refreshList = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations?archived=${archived}`);
+      const archived = viewRef.current === "archived";
+      const closed = viewRef.current === "closed";
+      const res = await fetch(
+        `/api/conversations?archived=${archived}&closed=${closed}&filter=${filterRef.current}`
+      );
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations);
@@ -48,10 +70,10 @@ export function InboxClient({ initialConversations }: Props) {
   // استطلاع قائمة المحادثات كل 15 ثانية
   // (يبقى كاحتياط حتى مع Pusher، وهو الطريقة الوحيدة عند غياب إعداداته)
   useEffect(() => {
-    refreshList(showArchived);
-    const t = setInterval(() => refreshList(showArchived), 15000);
+    refreshList();
+    const t = setInterval(refreshList, 15000);
     return () => clearInterval(t);
-  }, [showArchived, refreshList]);
+  }, [view, filter, refreshList]);
 
   // اشتراك Pusher الفوري في قناة مساحة العمل — تُجلب المفاتيح من الخادم
   // (قاعدة البيانات أو .env)، وعند غيابها نعتمد على الاستطلاع أعلاه
@@ -78,13 +100,13 @@ export function InboxClient({ initialConversations }: Props) {
               return [...prev, data.message];
             });
           }
-          refreshList(showArchivedRef.current);
+          refreshList();
         }
       );
 
-      // تحديث قائمة المحادثات (آخر رسالة / عدد غير المقروء)
+      // تحديث قائمة المحادثات (آخر رسالة / عدد غير المقروء / إسناد / إغلاق)
       channel.bind("conversation-updated", () => {
-        refreshList(showArchivedRef.current);
+        refreshList();
       });
     });
 
@@ -119,7 +141,7 @@ export function InboxClient({ initialConversations }: Props) {
             ? data.messages[data.messages.length - 1].createdAt
             : null;
         // الفتح علّم الرسائل كمقروءة — حدّث القائمة لإزالة شارة العدد
-        refreshList(showArchived);
+        refreshList();
       })
       .finally(() => {
         if (!cancelled) setLoadingMessages(false);
@@ -155,7 +177,7 @@ export function InboxClient({ initialConversations }: Props) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [selectedId, refreshList, showArchived]);
+  }, [selectedId, refreshList]);
 
   // تبديل الحالة بين الرد الآلي والتحكم اليدوي
   async function handleToggleStatus() {
@@ -166,7 +188,7 @@ export function InboxClient({ initialConversations }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
-    refreshList(showArchived);
+    refreshList();
   }
 
   // أرشفة / إلغاء أرشفة المحادثة الحالية
@@ -179,22 +201,83 @@ export function InboxClient({ initialConversations }: Props) {
     });
     setSelectedId(null);
     setMessages([]);
-    refreshList(showArchived);
+    refreshList();
   }
 
-  // إرسال رسالة يدوية وإضافتها فوراً للواجهة
-  async function handleSend(body: string) {
+  // إسناد المحادثة لعضو في الفريق أو إلغاء إسنادها (null)
+  async function handleAssign(userId: string | null) {
+    if (!selected) return;
+    await fetch(`/api/conversations/${selected.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignedToId: userId }),
+    });
+    refreshList();
+  }
+
+  // إغلاق المحادثة المنتهية وإخفاءها من الوارد — رسالة العميل تعيد فتحها
+  async function handleToggleClosed() {
+    if (!selected) return;
+    await fetch(`/api/conversations/${selected.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ closed: !selected.closedAt }),
+    });
+    // عند عرض قائمة المغلقة تختفي المحادثة منها بعد الإغلاق/الفتح
+    if (view === "closed") {
+      setSelectedId(null);
+      setMessages([]);
+    }
+    refreshList();
+  }
+
+  // إرسال رسالة (أو ملاحظة داخلية isNote) وإضافتها فوراً للواجهة
+  async function handleSend(body: string, isNote: boolean) {
     if (!selected) return;
     const res = await fetch(`/api/conversations/${selected.id}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, isNote }),
     });
     if (res.ok) {
       const data = await res.json();
       setMessages((prev) => [...prev, data.message]);
       lastTsRef.current = data.message.createdAt;
-      refreshList(showArchived);
+      refreshList();
+    }
+  }
+
+  // إرسال وسائط (ملف فعلي) مع تسمية توضيحية اختيارية
+  async function handleSendMedia(file: File, caption: string) {
+    if (!selected) return;
+    const form = new FormData();
+    form.append("file", file);
+    if (caption) form.append("caption", caption);
+    const res = await fetch(`/api/conversations/${selected.id}/media`, {
+      method: "POST",
+      body: form,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMessages((prev) => [...prev, data.message]);
+      lastTsRef.current = data.message.createdAt;
+      refreshList();
+    }
+  }
+
+  // إرسال قالب معتمد في ميتا بقيم المتغيرات
+  async function handleSendTemplate(templateId: string, params: string[]) {
+    if (!selected) return;
+    const res = await fetch(`/api/conversations/${selected.id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: { id: templateId, params } }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMessages((prev) => [...prev, data.message]);
+      lastTsRef.current = data.message.createdAt;
+      refreshList();
     }
   }
 
@@ -226,11 +309,14 @@ export function InboxClient({ initialConversations }: Props) {
           conversations={conversations}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          showArchived={showArchived}
-          onToggleArchived={() => {
-            setShowArchived((v) => !v);
+          view={view}
+          onViewChange={(v) => {
+            setView(v);
             setSelectedId(null);
+            setMessages([]);
           }}
+          filter={filter}
+          onFilterChange={setFilter}
         />
       </div>
 
@@ -241,9 +327,15 @@ export function InboxClient({ initialConversations }: Props) {
             conversation={selected}
             messages={messages}
             loading={loadingMessages}
+            members={members}
+            currentUserId={currentUserId}
             onSend={handleSend}
+            onSendMedia={handleSendMedia}
+            onSendTemplate={handleSendTemplate}
             onToggleStatus={handleToggleStatus}
             onToggleArchive={handleToggleArchive}
+            onAssign={handleAssign}
+            onToggleClosed={handleToggleClosed}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">

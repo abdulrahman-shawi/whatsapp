@@ -1,11 +1,16 @@
 "use client";
 
-import { Archive, Inbox as InboxIcon } from "lucide-react";
+import { Archive, CheckCheck, Inbox as InboxIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
-import type { ConversationListItem, ConversationStatus } from "./types";
+import type { ListView } from "./inbox-client";
+import type {
+  AssignmentFilter,
+  ConversationListItem,
+  ConversationStatus,
+} from "./types";
 
 // مسميات وألوان حالات المحادثة
 const statusConfig: Record<
@@ -17,12 +22,20 @@ const statusConfig: Record<
   HANDED_OFF: { label: "مسلّم", variant: "secondary" },
 };
 
+const viewTitles: Record<ListView, string> = {
+  open: "المحادثات",
+  archived: "المحادثات المؤرشفة",
+  closed: "المحادثات المغلقة",
+};
+
 type Props = {
   conversations: ConversationListItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  showArchived: boolean;
-  onToggleArchived: () => void;
+  view: ListView;
+  onViewChange: (view: ListView) => void;
+  filter: AssignmentFilter;
+  onFilterChange: (filter: AssignmentFilter) => void;
 };
 
 // قائمة المحادثات (العمود الأيمن في RTL)
@@ -30,29 +43,59 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
-  showArchived,
-  onToggleArchived,
+  view,
+  onViewChange,
+  filter,
+  onFilterChange,
 }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
-        <h2 className="font-semibold">
-          {showArchived ? "المحادثات المؤرشفة" : "المحادثات"}
-        </h2>
-        <Button variant="ghost" size="sm" onClick={onToggleArchived}>
-          {showArchived ? (
-            <>
+        <h2 className="font-semibold">{viewTitles[view]}</h2>
+        <div className="flex items-center gap-1">
+          {view !== "archived" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="المحادثات المؤرشفة"
+              onClick={() => onViewChange("archived")}
+            >
+              <Archive className="h-4 w-4" />
+            </Button>
+          )}
+          {view !== "closed" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="المحادثات المغلقة"
+              onClick={() => onViewChange("closed")}
+            >
+              <CheckCheck className="h-4 w-4" />
+            </Button>
+          )}
+          {view !== "open" && (
+            <Button variant="ghost" size="sm" onClick={() => onViewChange("open")}>
               <InboxIcon className="h-4 w-4" />
               الوارد
-            </>
-          ) : (
-            <>
-              <Archive className="h-4 w-4" />
-              المؤرشفة
-            </>
+            </Button>
           )}
-        </Button>
+        </div>
       </div>
+
+      {/* فلتر الإسناد — في الوارد المفتوح فقط */}
+      {view === "open" && (
+        <div className="border-b p-2">
+          <select
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value as AssignmentFilter)}
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="all">الكل</option>
+            <option value="mine">محادثاتي</option>
+            <option value="unassigned">غير مسندة</option>
+          </select>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {conversations.length === 0 ? (
@@ -95,6 +138,9 @@ export function ConversationList({
                   <Badge variant={status.variant}>{status.label}</Badge>
                   {c.platform === "WIDGET" && (
                     <Badge variant="outline">من الموقع</Badge>
+                  )}
+                  {c.assignedTo && (
+                    <Badge variant="outline">{c.assignedTo.name}</Badge>
                   )}
                 </div>
               </button>

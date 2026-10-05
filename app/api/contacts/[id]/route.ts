@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import type { ContactStage } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { isContactStage } from "@/lib/contact-stages";
 
 // تحديث بيانات جهة الاتصال: الاسم، الوسوم، الملاحظات
 export async function PATCH(
@@ -15,7 +17,12 @@ export async function PATCH(
     return NextResponse.json({ error: "طلب غير صالح" }, { status: 400 });
   }
 
-  const data: { name?: string | null; tags?: string[]; notes?: string | null } = {};
+  const data: {
+    name?: string | null;
+    tags?: string[];
+    notes?: string | null;
+    stage?: ContactStage;
+  } = {};
   if (body.name !== undefined) {
     if (body.name !== null && typeof body.name !== "string") {
       return NextResponse.json({ error: "الاسم غير صالح" }, { status: 400 });
@@ -34,6 +41,12 @@ export async function PATCH(
     }
     data.notes = body.notes?.trim() || null;
   }
+  if (body.stage !== undefined) {
+    if (!isContactStage(body.stage)) {
+      return NextResponse.json({ error: "الحالة غير صالحة" }, { status: 400 });
+    }
+    data.stage = body.stage;
+  }
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "لا يوجد ما يُحدَّث" }, { status: 400 });
   }
@@ -48,7 +61,7 @@ export async function PATCH(
   const contact = await prisma.contact.update({
     where: { id: params.id },
     data,
-    select: { id: true, name: true, waPhone: true, tags: true, notes: true },
+    select: { id: true, name: true, waPhone: true, tags: true, notes: true, stage: true },
   });
   return NextResponse.json({ contact });
 }

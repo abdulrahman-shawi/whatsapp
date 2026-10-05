@@ -30,6 +30,21 @@ export async function GET(req: Request) {
   }
 
   try {
+    // روابط UltraMsg المباشرة: نبثها كما هي دون الرجوع لميتا
+    if (mediaId.startsWith("http://") || mediaId.startsWith("https://")) {
+      const file = await fetch(mediaId);
+      if (!file.ok || !file.body) {
+        return NextResponse.json({ error: "تعذر تنزيل الوسائط" }, { status: 502 });
+      }
+      return new Response(file.body, {
+        headers: {
+          "Content-Type":
+            file.headers.get("Content-Type") ?? "application/octet-stream",
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    }
+
     // الخطوة 1: ميتا تعيد رابطاً مؤقتاً للملف
     const meta = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
       headers: { Authorization: `Bearer ${token}` },

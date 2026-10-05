@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
+import { StageBadge } from "./stage-badge";
 import type { ListView } from "./inbox-client";
 import type {
   AssignmentFilter,
@@ -115,8 +116,13 @@ export function ConversationList({
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-medium">
-                    {c.contact.name ?? c.contact.waPhone}
+                  <span className="flex min-w-0 items-center gap-2 font-medium">
+                    <span className="truncate">
+                      {c.contact.name ?? c.contact.waPhone}
+                    </span>
+                    <span className="shrink-0 rounded-full border px-1.5 py-0.5">
+                      <StageBadge stage={c.contact.stage} />
+                    </span>
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {relativeTime(c.lastMessageAt)}

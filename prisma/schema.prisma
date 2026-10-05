@@ -48,6 +48,16 @@ enum SenderType {
   CUSTOMER
 }
 
+// حالة العميل في مسار البيع (قابلة للتغيير من لوحة التفاصيل)
+enum ContactStage {
+  NEW // عملية بيع جديدة
+  CONTACTING // جاري التواصل
+  INTERESTED // مهتم
+  NEGOTIATING // مقفل للتراسل / تفاوض
+  CUSTOMER // عميل مشترٍ
+  LOST // ضائع
+}
+
 // حالة حملة البث الجماعي
 enum BroadcastStatus {
   QUEUED // مجدولة للإرسال في وقت مستقبلي
@@ -177,6 +187,7 @@ model Contact {
   waPhone      String // رقم الواتساب بصيغة دولية
   name         String?
   notes        String?
+  stage        ContactStage      @default(NEW) // مرحلة العميل في مسار البيع
   tags         String[]
   createdAt    DateTime       @default(now())
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

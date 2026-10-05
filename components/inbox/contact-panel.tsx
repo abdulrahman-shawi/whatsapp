@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { CONTACT_STAGES, stageConfig } from "@/lib/contact-stages";
 import type { ContactInfo } from "./types";
 
 type Props = {
   contact: ContactInfo;
-  onSave: (patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes">>) => void;
+  onSave: (
+    patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes" | "stage">>
+  ) => void;
 };
 
 // لوحة جهة الاتصال (العمود الأيسر): الاسم، الوسوم، الملاحظات، الحجوزات
@@ -51,6 +54,29 @@ export function ContactPanel({ contact, onSave }: Props) {
         <p className="text-xs text-muted-foreground" dir="ltr">
           {contact.waPhone}
         </p>
+      </div>
+
+      {/* حالة العميل في مسار البيع */}
+      <div className="space-y-2">
+        <Label htmlFor="contact-stage">حالة العميل</Label>
+        <div className="relative">
+          <span
+            className="pointer-events-none absolute start-3 top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full"
+            style={{ backgroundColor: stageConfig(contact.stage).color }}
+          />
+          <select
+            id="contact-stage"
+            value={contact.stage}
+            onChange={(e) => onSave({ stage: e.target.value })}
+            className="w-full appearance-none rounded-md border bg-background py-1.5 ps-8 pe-2 text-sm"
+          >
+            {CONTACT_STAGES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* الوسوم */}

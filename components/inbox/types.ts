@@ -6,6 +6,7 @@ export type ContactInfo = {
   waPhone: string;
   tags: string[];
   notes: string | null;
+  stage: string; // مرحلة العميل في مسار البيع — انظر lib/contact-stages.ts
 };
 
 export type MemberInfo = {

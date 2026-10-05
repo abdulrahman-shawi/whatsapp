@@ -38,7 +38,14 @@ export async function getWorkspaceConversations(
     orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }],
     include: {
       contact: {
-        select: { id: true, name: true, waPhone: true, tags: true, notes: true },
+        select: {
+          id: true,
+          name: true,
+          waPhone: true,
+          tags: true,
+          notes: true,
+          stage: true,
+        },
       },
       assignees: {
         include: { user: { select: { id: true, name: true } } },

@@ -28,6 +28,15 @@ function placeholderFor(type: string): string {
   return map[type] ?? `[${type}]`;
 }
 
+// أنواع وسائط UltraMsg القابلة للعرض — تصل كرابط مباشر في body
+const ULTRAMSG_MEDIA_TYPES: Record<string, string> = {
+  image: "image",
+  video: "video",
+  audio: "audio",
+  ptt: "audio", // الرسالة الصوتية المسجلة داخل واتساب
+  document: "document",
+};
+
 // استقبال الرسائل الواردة من UltraMsg
 // يُضبط رابط هذا الويب هوك في إعدادات النسخة (instance) في لوحة UltraMsg
 // مع إلحاق ?instanceId= بعنوانه لتحديد مساحة العمل المالكة (multi-tenant)
@@ -60,12 +69,17 @@ export async function POST(req: Request) {
     console.warn(`[ultramsg-webhook] لم تُعثر على مساحة عمل للنسخة ${instanceId}`);
   }
 
+  const mediaType = data.type ? ULTRAMSG_MEDIA_TYPES[data.type] : undefined;
+  // في UltraMsg تصل الوسائط كرابط مباشر في body (على عكس ميتا التي تعطي معرّفاً)
+  const mediaUrl =
+    mediaType && data.body?.startsWith("http") ? data.body : undefined;
+
   const text =
     data.type === "chat" || !data.type
       ? data.body ?? ""
       : placeholderFor(data.type);
 
-  if (text) {
+  if (text || mediaUrl) {
     // ننتظر اكتمال المعالجة قبل الرد — على Vercel تُجمَّد الدالة بعد إرسال
     // الرد، فالمعالجة غير المتزامنة (fire-and-forget) قد لا تكتمل أبداً
     try {
@@ -74,6 +88,9 @@ export async function POST(req: Request) {
         contactName: data.pushname ?? data.name ?? null,
         text,
         workspaceId: workspaceId ?? undefined,
+        media: mediaUrl
+          ? { mediaId: mediaUrl, mediaMime: null, mediaType: mediaType ?? null }
+          : undefined,
       });
     } catch (e) {
       console.error("[ultramsg-webhook] خطأ أثناء المعالجة:", e);

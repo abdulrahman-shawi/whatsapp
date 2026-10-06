@@ -27,7 +27,16 @@ export type IfCondition =
   | { kind: "HOURS_BETWEEN"; from: number; to: number } // الساعة الحالية بين ساعتين (0-23)
   | { kind: "DAY_OF_WEEK"; days: number[] } // اليوم الحالي ضمن أيام محددة (0=الأحد)
   | { kind: "MESSAGE_COUNT_MIN"; count: number } // عدد رسائل المحادثة لا يقل عن…
-  | { kind: "IS_CLOSED" }; // المحادثة مغلقة
+  | { kind: "IS_CLOSED" } // المحادثة مغلقة
+  | { kind: "PHONE_CONTAINS"; text: string } // رقم العميل يحتوي النص…
+  | { kind: "NAME_CONTAINS"; text: string } // اسم العميل يحتوي النص…
+  | { kind: "ASSIGNEE_IS"; userId: string } // المسند إليه المحادثة هو الموظف…
+  | { kind: "PLATFORM_IS"; platform: "WHATSAPP" | "WIDGET" } // قناة المحادثة
+  | { kind: "VAR_EQUALS"; name: string; value: string } // متغير سير العمل يساوي القيمة
+  | { kind: "LAST_OUTBOUND_HOURS"; hours: number }; // مرّت X ساعة على آخر رد منا (أو لم نرد أصلاً)
+
+// فرع واحد في شرط متعدد: شرط + خطوات تنفذ عند تحققه
+export type IfBranch = { condition: IfCondition; steps: WorkflowStep[] };
 
 // أنواع خطوات سير العمل — تُخزن كعناصر داخل مصفوفة steps (JSON)
 // الخطوات متداخلة عبر IF: لكل شرط فرعان then/else وكل منهما قائمة خطوات
@@ -51,7 +60,55 @@ export type WorkflowStep =
   | { type: "WEBHOOK"; url: string }
   | { type: "GOTO"; step: number } // قفز للأمام إلى رقم خطوة (1-based) في نفس المستوى
   | { type: "CREATE_BOOKING"; title: string; scheduledAt: string; notes?: string }
-  | { type: "IF"; condition: IfCondition; then: WorkflowStep[]; else: WorkflowStep[] };
+  | { type: "RESUME_AI" } // إعادة تفعيل الرد الآلي للمحادثة (عكس STOP_AI)
+  | { type: "ARCHIVE" } // أرشفة المحادثة
+  | { type: "UNARCHIVE" } // إلغاء أرشفة المحادثة
+  | { type: "MARK_READ" } // تعليم رسائل المحادثة مقروءة
+  | { type: "SET_VAR"; name: string; value: string } // تعيين متغير — يُستخدم في VAR_EQUALS و{{var:الاسم}}
+  | { type: "HTTP_REQUEST"; url: string; method: "GET" | "POST"; body?: string } // طلب عام — النتيجة في {{http}}
+  | { type: "AI_CLASSIFY"; prompt: string; options: string[]; var: string } // تصنيف آخر رسالة بالذكاء الاصطناعي إلى خيار
+  // شرط متعدد الفروع: يُنفذ أول فرع متحقق، وإلا فرع else (اختياري)
+  // branches[0] يعادل if، branches[1..] تعادل else-if، وelseSteps تعادل else
+  | { type: "IF"; branches: IfBranch[]; elseSteps: WorkflowStep[] };
+
+// الشكل القديم لخطوة IF (شرط واحد ثم/else) — يُحوَّل تلقائياً عند التنفيذ والعرض
+type LegacyIfStep = {
+  type: "IF";
+  condition: IfCondition;
+  then: WorkflowStep[];
+  else: WorkflowStep[];
+};
+
+// تحويل خطوة IF قديمة الشكل إلى الفروع المتعددة
+export function normalizeStep(step: WorkflowStep): WorkflowStep {
+  if (step.type !== "IF") return step;
+  const legacy = step as unknown as Partial<LegacyIfStep> & {
+    branches?: IfBranch[];
+    elseSteps?: WorkflowStep[];
+  };
+  if (Array.isArray(legacy.branches)) return step;
+  return {
+    type: "IF",
+    branches: [
+      { condition: legacy.condition!, steps: Array.isArray(legacy.then) ? legacy.then : [] },
+    ],
+    elseSteps: Array.isArray(legacy.else) ? legacy.else : [],
+  };
+}
+
+export function normalizeSteps(steps: WorkflowStep[]): WorkflowStep[] {
+  return steps.map((s) => {
+    const n = normalizeStep(s);
+    if (n.type === "IF") {
+      return {
+        ...n,
+        branches: n.branches.map((b) => ({ ...b, steps: normalizeSteps(b.steps) })),
+        elseSteps: normalizeSteps(n.elseSteps),
+      };
+    }
+    return n;
+  });
+}
 
 // إعدادات المحفّز حسب نوعه
 export type TriggerConfig =
@@ -94,7 +151,14 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "WEBHOOK", label: "Webhook خارجي" },
   { type: "CREATE_BOOKING", label: "إنشاء حجز موعد" },
   { type: "GOTO", label: "القفز إلى خطوة (للأمام)" },
-  { type: "IF", label: "شرط (إذا)" },
+  { type: "SET_VAR", label: "تعيين متغير" },
+  { type: "HTTP_REQUEST", label: "طلب HTTP عام" },
+  { type: "AI_CLASSIFY", label: "تصنيف بالذكاء الاصطناعي" },
+  { type: "RESUME_AI", label: "إعادة تفعيل الرد الآلي" },
+  { type: "ARCHIVE", label: "أرشفة المحادثة" },
+  { type: "UNARCHIVE", label: "إلغاء أرشفة المحادثة" },
+  { type: "MARK_READ", label: "تعليم الرسائل مقروءة" },
+  { type: "IF", label: "شرط (إذا / وإلا إذا / وإلا)" },
 ] as const;
 
 const MAX_TOTAL_STEPS = 40;
@@ -103,13 +167,25 @@ const MAX_DEPTH = 4; // عمق تداخل الشروط — منع استعلام
 // عدّ الخطوات شاملاً الفروع المتداخلة
 function countSteps(steps: WorkflowStep[]): number {
   return steps.reduce((sum, s) => {
-    if (s.type === "IF") return sum + 1 + countSteps(s.then) + countSteps(s.else);
+    if (s.type === "IF") {
+      return (
+        sum +
+        1 +
+        s.branches.reduce((b, branch) => b + countSteps(branch.steps), 0) +
+        countSteps(s.elseSteps)
+      );
+    }
     return sum + 1;
   }, 0);
 }
 
-// التحقق من شرط IF
-function validateCondition(cond: IfCondition | undefined, label: string, errors: string[]) {
+// التحقق من شرط IF — memberIds للشروط المرتبطة بالموظفين
+function validateCondition(
+  cond: IfCondition | undefined,
+  label: string,
+  errors: string[],
+  memberIds: string[]
+) {
   if (!cond || typeof cond !== "object" || !("kind" in cond)) {
     errors.push(`${label}: الشرط مطلوب`);
     return;
@@ -123,8 +199,32 @@ function validateCondition(cond: IfCondition | undefined, label: string, errors:
       break;
     case "TEXT_CONTAINS":
     case "DB_CONTAINS":
+    case "PHONE_CONTAINS":
+    case "NAME_CONTAINS":
       if (!cond.text?.trim()) errors.push(`${label}: نص الشرط مطلوب`);
       break;
+    case "ASSIGNEE_IS":
+      if (cond.userId !== "any" && !memberIds.includes(cond.userId)) {
+        errors.push(`${label}: الموظف المحدد ليس عضواً في الفريق`);
+      }
+      break;
+    case "PLATFORM_IS":
+      if (!["WHATSAPP", "WIDGET"].includes(cond.platform)) {
+        errors.push(`${label}: القناة غير صالحة`);
+      }
+      break;
+    case "VAR_EQUALS":
+      if (!cond.name?.trim() || !cond.value?.trim()) {
+        errors.push(`${label}: اسم المتغير والقيمة مطلوبان`);
+      }
+      break;
+    case "LAST_OUTBOUND_HOURS": {
+      const hours = Number(cond.hours);
+      if (!Number.isInteger(hours) || hours < 1 || hours > 24 * 30) {
+        errors.push(`${label}: المدة بين ساعة و٧٢٠ ساعة`);
+      }
+      break;
+    }
     case "HOURS_BETWEEN": {
       const from = Number(cond.from);
       const to = Number(cond.to);
@@ -219,6 +319,32 @@ export function validateSteps(
             errors.push(`${label}: موعد الحجز غير صالح`);
           }
           break;
+        case "SET_VAR":
+          if (!step.name?.trim() || !/^\w+$/.test(step.name.trim())) {
+            errors.push(`${label}: اسم المتغير مطلوب (أحرف إنجليزية وأرقام وشرطة سفلية)`);
+          }
+          if (step.value === undefined || step.value === null) {
+            errors.push(`${label}: قيمة المتغير مطلوبة`);
+          }
+          break;
+        case "HTTP_REQUEST":
+          if (!/^https?:\/\//.test(step.url ?? "")) {
+            errors.push(`${label}: الرابط يجب أن يبدأ بـ http(s)://`);
+          }
+          if (step.method && !["GET", "POST"].includes(step.method)) {
+            errors.push(`${label}: الطريقة GET أو POST`);
+          }
+          break;
+        case "AI_CLASSIFY": {
+          const options = Array.isArray(step.options) ? step.options.filter((o) => o?.trim()) : [];
+          if (options.length < 2 || options.length > 10) {
+            errors.push(`${label}: الخيارات بين 2 و10`);
+          }
+          if (!step.var?.trim() || !/^\w+$/.test(step.var.trim())) {
+            errors.push(`${label}: اسم متغير التصنيف مطلوب (أحرف إنجليزية وأرقام)`);
+          }
+          break;
+        }
         case "GOTO":
           if (
             !Number.isInteger(step.step) ||
@@ -246,19 +372,31 @@ export function validateSteps(
           break;
         case "IF": {
           if (depth >= MAX_DEPTH) {
-            errors.push(`${label}: لا يمكن تداخل شرط داخل شرط`);
+            errors.push(`${label}: الحد الأقصى ${MAX_DEPTH} مستويات تداخل للشروط`);
             break;
           }
-          validateCondition(step.condition, label, errors);
-          if (!Array.isArray(step.then) || !Array.isArray(step.else)) {
-            errors.push(`${label}: فروعا الشرط (نعم/لا) مطلوبان`);
+          const branches = Array.isArray(step.branches) ? step.branches : [];
+          if (branches.length === 0 || branches.length > 10) {
+            errors.push(`${label}: عدد الفروع بين 1 و10`);
             break;
           }
-          if (step.then.length === 0 && step.else.length === 0) {
-            errors.push(`${label}: أضف خطوة في أحد الفرعين على الأقل`);
+          branches.forEach((branch, bi) => {
+            const branchLabel = `${label}←فرع${bi + 1}:`;
+            validateCondition(branch.condition, branchLabel, errors, memberIds);
+            if (!Array.isArray(branch.steps)) {
+              errors.push(`${branchLabel}: قائمة الخطوات غير صالحة`);
+              return;
+            }
+            walk(branch.steps, depth + 1, branchLabel);
+          });
+          const elseSteps = Array.isArray(step.elseSteps) ? step.elseSteps : [];
+          walk(elseSteps, depth + 1, `${label}←else:`);
+          const anySteps =
+            branches.some((b) => Array.isArray(b.steps) && b.steps.length > 0) ||
+            elseSteps.length > 0;
+          if (!anySteps) {
+            errors.push(`${label}: أضف خطوة في أحد الفروع على الأقل`);
           }
-          walk(step.then, depth + 1, `${label}←نعم:`);
-          walk(step.else, depth + 1, `${label}←لا:`);
           break;
         }
         default:
@@ -271,14 +409,16 @@ export function validateSteps(
   return errors;
 }
 
-// استبدال متغيرات التخصيص في نص الرسالة
+// استبدال متغيرات التخصيص في نص الرسالة — {{var:الاسم}} للمتغيرات المخصصة
 function personalize(body: string, ctx: WorkflowContext): string {
   return body
+    .replace(/\{\{var:(\w+)\}\}/g, (_m, name: string) => ctx.vars[name] ?? "")
     .replaceAll("{{name}}", ctx.contactName ?? "عميلنا الكريم")
     .replaceAll("{{phone}}", ctx.waPhone)
     .replaceAll("{{stage}}", ctx.stage ?? "")
     .replaceAll("{{tags}}", (ctx.tags ?? []).join("، "))
-    .replaceAll("{{db}}", ctx.vars["db"] ?? "");
+    .replaceAll("{{db}}", ctx.vars["db"] ?? "")
+    .replaceAll("{{http}}", ctx.vars["http"] ?? "");
 }
 
 // إرسال رسالة واتساب (نص أو قالب) وتخزينها في المحادثة
@@ -477,6 +617,44 @@ async function evaluateCondition(
         select: { closedAt: true },
       });
       return conversation?.closedAt != null;
+    }
+    case "PHONE_CONTAINS":
+      return ctx.waPhone.includes(cond.text.trim());
+    case "NAME_CONTAINS":
+      return (ctx.contactName ?? "").toLowerCase().includes(cond.text.trim().toLowerCase());
+    case "ASSIGNEE_IS": {
+      if (!ctx.conversationId) return false;
+      if (cond.userId === "any") {
+        const count = await prisma.conversationAssignee.count({
+          where: { conversationId: ctx.conversationId },
+        });
+        return count > 0;
+      }
+      const assignee = await prisma.conversationAssignee.findFirst({
+        where: { conversationId: ctx.conversationId, userId: cond.userId },
+      });
+      return assignee != null;
+    }
+    case "PLATFORM_IS": {
+      if (!ctx.conversationId) return false;
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: ctx.conversationId },
+        select: { platform: true },
+      });
+      return conversation?.platform === cond.platform;
+    }
+    case "VAR_EQUALS":
+      return (ctx.vars[cond.name.trim()] ?? "") === cond.value.trim();
+    case "LAST_OUTBOUND_HOURS": {
+      if (!ctx.conversationId) return false;
+      const last = await prisma.message.findFirst({
+        where: { conversationId: ctx.conversationId, direction: "OUTBOUND", isNote: false },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      // لا رد سابق منا = الشرط متحقق (لم نرد أصلاً منذ البداية)
+      if (!last) return true;
+      return Date.now() - last.createdAt.getTime() >= cond.hours * 3_600_000;
     }
     default:
       return false;
@@ -742,6 +920,93 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       });
       return "أُنشئ الحجز";
     }
+    case "RESUME_AI": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة");
+      await prisma.conversation.update({
+        where: { id: ctx.conversationId },
+        data: { status: "AI" },
+      });
+      return "أُعيد تفعيل الرد الآلي";
+    }
+    case "ARCHIVE": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة");
+      await prisma.conversation.update({
+        where: { id: ctx.conversationId },
+        data: { isArchived: true },
+      });
+      return "أُرشفت المحادثة";
+    }
+    case "UNARCHIVE": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة");
+      await prisma.conversation.update({
+        where: { id: ctx.conversationId },
+        data: { isArchived: false },
+      });
+      return "أُلغي أرشفة المحادثة";
+    }
+    case "MARK_READ": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة");
+      await prisma.message.updateMany({
+        where: { conversationId: ctx.conversationId, direction: "INBOUND", isRead: false },
+        data: { isRead: true },
+      });
+      return "عُلّمت الرسائل مقروءة";
+    }
+    case "SET_VAR": {
+      ctx.vars[step.name.trim()] = personalize(step.value, ctx);
+      return `ضُبط المتغير ${step.name.trim()}`;
+    }
+    case "HTTP_REQUEST": {
+      const res = await fetch(step.url, {
+        method: step.method === "POST" ? "POST" : "GET",
+        headers: step.method === "POST" ? { "Content-Type": "application/json" } : undefined,
+        body:
+          step.method === "POST" && step.body
+            ? personalize(step.body, ctx)
+            : undefined,
+        signal: AbortSignal.timeout(10_000),
+      });
+      const text = (await res.text().catch(() => "")).slice(0, 2000);
+      ctx.vars["http"] = text;
+      if (!res.ok) throw new Error(`الطلب ردّ بالحالة ${res.status} — النتيجة في {{http}}`);
+      return "نُفّذ الطلب — النتيجة في {{http}}";
+    }
+    case "AI_CLASSIFY": {
+      const options = step.options.map((o) => o.trim()).filter(Boolean);
+      const aiConfig = await resolveAiConfig(ctx.workspaceId);
+      const systemPrompt = [
+        step.prompt?.trim() || "صنّف نص العميل التالي إلى واحد من الخيارات التالية.",
+        `الخيارات: ${options.join(" | ")}`,
+        `أجب بأحد الخيارات حرفياً وبلا أي شرح إضافي.`,
+      ].join("\n");
+      const result = await generateReply(
+        [{ role: "user", content: ctx.text || "(لا يوجد نص)" }],
+        systemPrompt,
+        [],
+        aiConfig
+      );
+      if (!result) throw new Error("تعذّر تصنيف النص");
+      // نتطابق الخيار المعاد — أي خيار يظهر في الرد (حساسية حالة غير مهمة)
+      const reply = result.content.trim();
+      const matched =
+        options.find((o) => reply === o) ??
+        options.find((o) => reply.toLowerCase().includes(o.toLowerCase())) ??
+        "";
+      ctx.vars[step.var.trim()] = matched;
+      // احتساب التوكنات في رصيد الباقة
+      const month = new Date().toISOString().slice(0, 7);
+      await prisma.usageRecord.upsert({
+        where: { workspaceId_month: { workspaceId: ctx.workspaceId, month } },
+        update: { tokensUsed: { increment: result.usage.totalTokens } },
+        create: {
+          workspaceId: ctx.workspaceId,
+          month,
+          tokensUsed: result.usage.totalTokens,
+        },
+      });
+      if (!matched) return `تصنيف بلا تطابق — {{${step.var.trim()}}} فارغ (الرد: ${reply.slice(0, 40)})`;
+      return `صُنّف النص إلى "${matched}" في {{${step.var.trim()}}}`;
+    }
     default:
       throw new Error(`نوع خطوة غير معروف: ${(step as WorkflowStep).type}`);
   }
@@ -813,10 +1078,29 @@ export async function executeWorkflow(
     }
 
     if (step.type === "IF") {
-      const passed = await evaluateCondition(step.condition, ctx).catch(() => false);
-      const branch = passed ? step.then : step.else;
-      logs.push(`↳ IF (${step.condition.kind}) → ${passed ? "نعم" : "لا"}`);
-      if (branch.length > 0) stack.push({ steps: branch, index: 0 });
+      const multi = normalizeStep(step);
+      if (multi.type !== "IF") continue;
+      // أول فرع متحقق يُنفذ، وإلا فرع else — يشبه if / else-if / else
+      let chosen: WorkflowStep[] | null = null;
+      let matched = -1;
+      for (let b = 0; b < multi.branches.length; b++) {
+        const branch = multi.branches[b];
+        const passed = await evaluateCondition(branch.condition, ctx).catch(() => false);
+        logs.push(`↳ IF فرع${b + 1} (${branch.condition.kind}) → ${passed ? "متحقق" : "لا"}`);
+        if (passed) {
+          chosen = branch.steps;
+          matched = b;
+          break;
+        }
+      }
+      if (chosen === null && multi.elseSteps.length > 0) {
+        chosen = multi.elseSteps;
+        logs.push("↳ IF → else");
+      }
+      if (chosen && chosen.length > 0) stack.push({ steps: chosen, index: 0 });
+      if (matched < 0 && multi.elseSteps.length === 0) {
+        logs.push("↳ IF → لا فرع متحقق ولا else — تُخطّى");
+      }
       continue;
     }
 

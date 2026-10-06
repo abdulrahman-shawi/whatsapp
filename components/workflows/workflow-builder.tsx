@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Archive,
+  ArchiveRestore,
   BookOpen,
   Bot,
   CalendarPlus,
@@ -12,9 +14,13 @@ import {
   Database,
   Flag,
   GitBranch,
+  Globe,
   Image,
+  ListFilter,
   Loader2,
+  MailOpen,
   MapPin,
+  Play,
   Plus,
   RotateCcw,
   Save,
@@ -23,6 +29,7 @@ import {
   Tag,
   Trash2,
   UserCheck,
+  Variable,
   Webhook,
   Workflow as WorkflowIcon,
   X,
@@ -52,7 +59,20 @@ type IfCondition =
   | { kind: "HOURS_BETWEEN"; from: number; to: number }
   | { kind: "DAY_OF_WEEK"; days: number[] }
   | { kind: "MESSAGE_COUNT_MIN"; count: number }
-  | { kind: "IS_CLOSED" };
+  | { kind: "IS_CLOSED" }
+  | { kind: "PHONE_CONTAINS"; text: string }
+  | { kind: "NAME_CONTAINS"; text: string }
+  | { kind: "ASSIGNEE_IS"; userId: string }
+  | { kind: "PLATFORM_IS"; platform: string }
+  | { kind: "VAR_EQUALS"; name: string; value: string }
+  | { kind: "LAST_OUTBOUND_HOURS"; hours: number };
+
+type IfBranchShape = { condition: IfCondition; steps: Step[] };
+
+const PLATFORM_LABELS: Record<string, string> = {
+  WHATSAPP: "واتساب",
+  WIDGET: "ودجت الموقع",
+};
 
 // أيام الأسبوع بترتيبها العربي (السبت أولاً) — القيم كما في Date.getDay()
 const WEEK_DAYS = [
@@ -115,6 +135,13 @@ const STEP_TYPES: {
   { type: "REOPEN", label: "إعادة فتح المحادثة", description: "إعادة فتح محادثة مغلقة", icon: RotateCcw, color: "#22c55e" },
   { type: "CLOSE", label: "إغلاق المحادثة", description: "إغلاق المحادثة وإخفاءها من الوارد", icon: CheckCheck, color: "#64748b" },
   { type: "CREATE_BOOKING", label: "إنشاء حجز", description: "حجز موعد جديد مع العميل", icon: CalendarPlus, color: "#0ea5e9" },
+  { type: "RESUME_AI", label: "إعادة تفعيل الرد الآلي", description: "عكس إيقاف الرد الآلي — يعيد رد الوكيل", icon: Play, color: "#84cc16" },
+  { type: "ARCHIVE", label: "أرشفة المحادثة", description: "نقل المحادثة للأرشيف", icon: Archive, color: "#78716c" },
+  { type: "UNARCHIVE", label: "إلغاء أرشفة المحادثة", description: "إرجاع المحادثة من الأرشيف", icon: ArchiveRestore, color: "#a8a29e" },
+  { type: "MARK_READ", label: "تعليم الرسائل مقروءة", description: "تعليم كل رسائل المحادثة مقروءة", icon: MailOpen, color: "#0d9488" },
+  { type: "SET_VAR", label: "تعيين متغير", description: "تخزين قيمة تُستخدم في الشروط والرسائل", icon: Variable, color: "#f472b6" },
+  { type: "HTTP_REQUEST", label: "طلب HTTP عام", description: "نداء رابط خارجي — النتيجة في {{http}}", icon: Globe, color: "#0891b2" },
+  { type: "AI_CLASSIFY", label: "تصنيف بالذكاء الاصطناعي", description: "تصنيف آخر رسالة إلى أحد الخيارات", icon: ListFilter, color: "#c026d3" },
   { type: "WAIT", label: "انتظار (تأخير)", description: "تأخير قبل متابعة الخطوات التالية", icon: Clock, color: "#f97316" },
   { type: "WEBHOOK", label: "Webhook", description: "إرسال بيانات العميل إلى رابط خارجي", icon: Webhook, color: "#0ea5e9" },
   { type: "GOTO", label: "الانتقال لخطوة", description: "القفز إلى خطوة أخرى في سير العمل (للأمام)", icon: CornerUpRight, color: "#6366f1" },
@@ -162,19 +189,63 @@ function emptyStep(type: string): Step {
       return { type, title: "", scheduledAt: "", notes: "" };
     case "GOTO":
       return { type, step: 1 };
+    case "SET_VAR":
+      return { type, name: "", value: "" };
+    case "HTTP_REQUEST":
+      return { type, url: "", method: "GET", body: "" };
+    case "AI_CLASSIFY":
+      return { type, prompt: "", options: [], var: "" };
     case "IF":
       return {
         type,
-        condition: { kind: "STAGE", stage: "NEW" } satisfies IfCondition,
-        then: [],
-        else: [],
+        branches: [
+          {
+            condition: { kind: "STAGE", stage: "NEW" } satisfies IfCondition,
+            steps: [],
+          },
+        ],
+        elseSteps: [],
       };
     default:
       return { type };
   }
 }
 
-function conditionSummary(cond: IfCondition): string {
+// شرط افتراضي عند تبديل نوع الشرط في محرر IF
+function defaultCondition(kind: IfCondition["kind"]): IfCondition {
+  switch (kind) {
+    case "STAGE":
+      return { kind, stage: "NEW" };
+    case "HAS_TAG":
+      return { kind, tag: "" };
+    case "TEXT_CONTAINS":
+    case "DB_CONTAINS":
+    case "PHONE_CONTAINS":
+    case "NAME_CONTAINS":
+      return { kind, text: "" };
+    case "ASSIGNEE_IS":
+      return { kind, userId: "any" };
+    case "STATUS_IS":
+      return { kind, status: "AI" };
+    case "HOURS_BETWEEN":
+      return { kind, from: 9, to: 17 };
+    case "DAY_OF_WEEK":
+      return { kind, days: [] };
+    case "MESSAGE_COUNT_MIN":
+      return { kind, count: 1 };
+    case "VAR_EQUALS":
+      return { kind, name: "", value: "" };
+    case "LAST_OUTBOUND_HOURS":
+      return { kind, hours: 24 };
+    default:
+      return { kind } as IfCondition;
+  }
+}
+
+function conditionSummary(
+  cond: IfCondition,
+  members: { id: string; name: string }[] = []
+): string {
   switch (cond.kind) {
     case "STAGE":
       return `حالة العميل = ${stageConfig(cond.stage).label}`;
@@ -198,7 +269,59 @@ function conditionSummary(cond: IfCondition): string {
       return `عدد رسائل العميل ≥ ${cond.count ?? 1}`;
     case "IS_CLOSED":
       return "المحادثة مغلقة";
+    case "PHONE_CONTAINS":
+      return `رقم العميل يحتوي "${cond.text || "—"}"`;
+    case "NAME_CONTAINS":
+      return `اسم العميل يحتوي "${cond.text || "—"}"`;
+    case "ASSIGNEE_IS":
+      return cond.userId === "any"
+        ? "مسندة لأي موظف"
+        : `المسند إليه: ${members.find((m) => m.id === cond.userId)?.name ?? "موظف محذوف"}`;
+    case "PLATFORM_IS":
+      return `القناة: ${PLATFORM_LABELS[cond.platform] ?? cond.platform}`;
+    case "VAR_EQUALS":
+      return `المتغير ${cond.name || "—"} = "${cond.value || "—"}"`;
+    case "LAST_OUTBOUND_HOURS":
+      return `مرّت ${cond.hours ?? 24} ساعة على آخر رد منا`;
   }
+}
+
+// تحويل IF قديم الشكل ({condition, then, else}) إلى الفروع المتعددة —
+// نسخة محلية خالصة من normalizeSteps في lib/workflows (لا تُستورد تلك الوحدة
+// هنا لأنها تجذب prisma ووحدات خادم إلى حزمة المتصفح)
+function normalizeStepsShape(steps: Step[]): Step[] {
+  return steps.map((step) => {
+    if (step.type !== "IF") return step;
+    if (Array.isArray(step.branches)) {
+      return {
+        ...step,
+        branches: (step.branches as IfBranchShape[]).map((b) => ({
+          ...b,
+          steps: normalizeStepsShape(Array.isArray(b.steps) ? b.steps : []),
+        })),
+        elseSteps: normalizeStepsShape(
+          Array.isArray(step.elseSteps) ? (step.elseSteps as Step[]) : []
+        ),
+      };
+    }
+    return {
+      type: "IF",
+      branches: [
+        {
+          condition: (step.condition as IfCondition | undefined) ?? {
+            kind: "STAGE",
+            stage: "NEW",
+          },
+          steps: Array.isArray(step.then)
+            ? normalizeStepsShape(step.then as Step[])
+            : [],
+        },
+      ],
+      elseSteps: Array.isArray(step["else"])
+        ? normalizeStepsShape(step["else"] as Step[])
+        : [],
+    };
+  });
 }
 
 // ملخص الخطوة المعروض داخل بطاقة العقدة
@@ -246,11 +369,29 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
       return ((step.url as string) || "—").slice(0, 50);
     case "GOTO":
       return `إلى الخطوة ${step.step ?? 1}`;
+    case "RESUME_AI":
+      return "إعادة تفعيل الرد الآلي";
+    case "ARCHIVE":
+      return "أرشفة المحادثة";
+    case "UNARCHIVE":
+      return "إلغاء أرشفة المحادثة";
+    case "MARK_READ":
+      return "تعليم الرسائل مقروءة";
+    case "SET_VAR":
+      return `المتغير ${(step.name as string) || "—"} = "${((step.value as string) || "").slice(0, 30)}"`;
+    case "HTTP_REQUEST":
+      return `${(step.method as string) ?? "GET"} ${((step.url as string) || "—").slice(0, 40)}`;
+    case "AI_CLASSIFY": {
+      const options = Array.isArray(step.options) ? (step.options as string[]) : [];
+      return `تصنيف (${options.length} خيار) في ${(step.var as string) || "—"}`;
+    }
     case "IF": {
-      const cond = (step.condition as IfCondition | undefined) ?? { kind: "STAGE", stage: "NEW" };
-      const thenSteps = Array.isArray(step.then) ? (step.then as Step[]).length : 0;
-      const elseSteps = Array.isArray(step.else) ? (step.else as Step[]).length : 0;
-      return `إذا ${conditionSummary(cond)} ← نعم:${thenSteps} لا:${elseSteps}`;
+      const branches = Array.isArray(step.branches) ? (step.branches as unknown[]) : [];
+      const hasElse = Array.isArray(step.elseSteps);
+      const n = branches.length;
+      const nText =
+        n === 1 ? "فرع واحد" : n === 2 ? "فرعان" : `${n} فروع`;
+      return `${nText}${hasElse ? " + وإلا" : " بدون وإلا"}`;
     }
     default:
       return "";
@@ -279,8 +420,10 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   const [noReplyHours, setNoReplyHours] = useState<number>(
     (workflow?.triggerConfig as { hours?: number })?.hours ?? 24
   );
-  const [steps, setSteps] = useState<Step[]>(
-    Array.isArray(workflow?.steps) ? (workflow!.steps as Step[]) : []
+  const [steps, setSteps] = useState<Step[]>(() =>
+    normalizeStepsShape(
+      Array.isArray(workflow?.steps) ? (workflow!.steps as Step[]) : []
+    )
   );
   const [keywordInput, setKeywordInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -294,14 +437,14 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   const editingStep =
     editor && !editor.isNew ? getStepAtPath(steps, editor.path) : null;
 
-  // تتبّع مسار قائمة: أزواج (فهرس خطوة، فرع 0=نعم/1=لا) نزولاً من المستوى الأعلى
+  // تتبّع مسار قائمة: أزواج (فهرس خطوة، فهرس فرع) نزولاً من المستوى الأعلى.
+  // فهرس الفرع b يشير إلى branches[b]، وb === branches.length يعني elseSteps
   function getListAtPath(root: Step[], path: number[]): Step[] {
     let list = root;
     for (let k = 0; k < path.length; k += 2) {
       const step = list[path[k]];
       if (!step) return [];
-      const branch = step[path[k + 1] === 0 ? "then" : "else"];
-      list = Array.isArray(branch) ? (branch as Step[]) : [];
+      list = branchListOf(step, path[k + 1]);
     }
     return list;
   }
@@ -311,9 +454,28 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     return list[path[path.length - 1]] ?? null;
   }
 
-  function branchListOf(step: Step, branch: number): Step[] {
-    const key = branch === 0 ? "then" : "else";
-    return Array.isArray(step[key]) ? (step[key] as Step[]) : [];
+  function branchCountOf(step: Step): number {
+    return Array.isArray(step.branches) ? (step.branches as unknown[]).length : 0;
+  }
+
+  function branchListOf(step: Step, b: number): Step[] {
+    if (b < branchCountOf(step)) {
+      const branch = (step.branches as IfBranchShape[])[b];
+      return Array.isArray(branch?.steps) ? (branch.steps as Step[]) : [];
+    }
+    return Array.isArray(step.elseSteps) ? (step.elseSteps as Step[]) : [];
+  }
+
+  function replaceBranchList(step: Step, b: number, list: Step[]): Step {
+    if (b < branchCountOf(step)) {
+      return {
+        ...step,
+        branches: (step.branches as IfBranchShape[]).map((br, j) =>
+          j === b ? { ...br, steps: list } : br
+        ),
+      };
+    }
+    return { ...step, elseSteps: list };
   }
 
   function updateStepAtPath(root: Step[], path: number[], patch: Partial<Step>): Step[] {
@@ -322,10 +484,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
       return root.map((s, i) => (i === index ? { ...s, ...patch } : s));
     }
     const [branch, ...rest] = path.slice(1);
-    const key = branch === 0 ? "then" : "else";
     return root.map((s, i) =>
       i === index
-        ? { ...s, [key]: updateStepAtPath(branchListOf(s, branch), rest, patch) }
+        ? replaceBranchList(
+            s,
+            branch,
+            updateStepAtPath(branchListOf(s, branch), rest, patch)
+          )
         : s
     );
   }
@@ -333,10 +498,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   function addStepAtPath(root: Step[], listPath: number[], step: Step): Step[] {
     if (listPath.length === 0) return [...root, step];
     const [index, branch, ...rest] = listPath;
-    const key = branch === 0 ? "then" : "else";
     return root.map((s, i) =>
       i === index
-        ? { ...s, [key]: addStepAtPath(branchListOf(s, branch ?? 0), rest, step) }
+        ? replaceBranchList(s, branch, addStepAtPath(branchListOf(s, branch), rest, step))
         : s
     );
   }
@@ -345,10 +509,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     const index = path[0];
     if (path.length === 1) return root.filter((_, i) => i !== index);
     const [branch, ...rest] = path.slice(1);
-    const key = branch === 0 ? "then" : "else";
     return root.map((s, i) =>
       i === index
-        ? { ...s, [key]: removeStepAtPath(branchListOf(s, branch), rest) }
+        ? replaceBranchList(s, branch, removeStepAtPath(branchListOf(s, branch), rest))
         : s
     );
   }
@@ -408,6 +571,236 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   function stepFields(step: Step, path: number[]) {
     const update = (patch: Partial<Step>) =>
       setSteps((prev) => updateStepAtPath(prev, path, patch));
+
+    // محرّر شرط واحد: نوع الشرط + حقوله — يُستخدم لكل فرع في خطوة IF
+    function conditionEditor(
+      cond: IfCondition,
+      setCond: (next: IfCondition) => void
+    ) {
+      const patchCond = (patch: Partial<IfCondition>) =>
+        setCond({ ...cond, ...patch } as IfCondition);
+      const days = cond.kind === "DAY_OF_WEEK" ? (cond.days ?? []) : [];
+      const toggleDay = (value: number) =>
+        patchCond({
+          days: days.includes(value)
+            ? days.filter((d) => d !== value)
+            : [...days, value],
+        });
+      return (
+        <div className="space-y-1.5">
+          <select
+            value={cond.kind}
+            onChange={(e) =>
+              setCond(defaultCondition(e.target.value as IfCondition["kind"]))
+            }
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="STAGE">حالة العميل</option>
+            <option value="HAS_TAG">يحمل الوسم</option>
+            <option value="TEXT_CONTAINS">الرسالة تحتوي</option>
+            <option value="BUSINESS_HOURS">ضمن ساعات العمل</option>
+            <option value="DB_CONTAINS">نتيجة قاعدة البيانات تحتوي</option>
+            <option value="HAS_ASSIGNEE">لها موظف مسند</option>
+            <option value="STATUS_IS">حالة المحادثة</option>
+            <option value="HOURS_BETWEEN">الساعة بين وقتين</option>
+            <option value="DAY_OF_WEEK">يوم الأسبوع</option>
+            <option value="MESSAGE_COUNT_MIN">عدد رسائل العميل</option>
+            <option value="IS_CLOSED">المحادثة مغلقة</option>
+            <option value="PHONE_CONTAINS">رقم العميل يحتوي</option>
+            <option value="NAME_CONTAINS">اسم العميل يحتوي</option>
+            <option value="ASSIGNEE_IS">المسند إليه هو</option>
+            <option value="PLATFORM_IS">قناة المحادثة</option>
+            <option value="VAR_EQUALS">متغير يساوي</option>
+            <option value="LAST_OUTBOUND_HOURS">ساعات منذ آخر رد منا</option>
+          </select>
+          {cond.kind === "STAGE" && (
+            <select
+              value={cond.stage}
+              onChange={(e) => patchCond({ stage: e.target.value })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {CONTACT_STAGES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {cond.kind === "HAS_TAG" && (
+            <Input
+              value={cond.tag}
+              onChange={(e) => patchCond({ tag: e.target.value })}
+              placeholder="الوسم المطلوب"
+            />
+          )}
+          {(cond.kind === "TEXT_CONTAINS" ||
+            cond.kind === "DB_CONTAINS" ||
+            cond.kind === "PHONE_CONTAINS" ||
+            cond.kind === "NAME_CONTAINS") && (
+            <Input
+              value={cond.text}
+              onChange={(e) => patchCond({ text: e.target.value })}
+              placeholder="النص المطلوب"
+            />
+          )}
+          {cond.kind === "BUSINESS_HOURS" && (
+            <p className="text-xs text-muted-foreground">
+              يُضبط من صفحة التكاملات: ساعات العمل
+            </p>
+          )}
+          {cond.kind === "HAS_ASSIGNEE" && (
+            <p className="text-xs text-muted-foreground">
+              يتحقق إذا وُجد موظف مسند للمحادثة
+            </p>
+          )}
+          {cond.kind === "STATUS_IS" && (
+            <select
+              value={cond.status}
+              onChange={(e) => patchCond({ status: e.target.value })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {Object.entries(CONVERSATION_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          )}
+          {cond.kind === "HOURS_BETWEEN" && (
+            <div className="flex items-start gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">من ساعة</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={cond.from ?? 0}
+                  onChange={(e) =>
+                    patchCond({
+                      from: Math.min(23, Math.max(0, Number(e.target.value) || 0)),
+                    })
+                  }
+                  className="w-20"
+                  dir="ltr"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">إلى ساعة</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={cond.to ?? 23}
+                  onChange={(e) =>
+                    patchCond({
+                      to: Math.min(23, Math.max(0, Number(e.target.value) || 23)),
+                    })
+                  }
+                  className="w-20"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+          )}
+          {cond.kind === "DAY_OF_WEEK" && (
+            <div className="flex flex-wrap gap-1.5">
+              {WEEK_DAYS.map((d) => (
+                <button
+                  key={d.value}
+                  type="button"
+                  onClick={() => toggleDay(d.value)}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    days.includes(d.value)
+                      ? "border-primary bg-accent font-medium"
+                      : "hover:bg-muted"
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {cond.kind === "MESSAGE_COUNT_MIN" && (
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                value={cond.count ?? 1}
+                onChange={(e) =>
+                  patchCond({ count: Math.max(1, Number(e.target.value) || 1) })
+                }
+                className="w-24"
+                dir="ltr"
+              />
+              <span className="text-xs text-muted-foreground">رسالة أو أكثر</span>
+            </div>
+          )}
+          {cond.kind === "IS_CLOSED" && (
+            <p className="text-xs text-muted-foreground">
+              يتحقق إذا كانت المحادثة مغلقة
+            </p>
+          )}
+          {cond.kind === "ASSIGNEE_IS" && (
+            <select
+              value={cond.userId ?? "any"}
+              onChange={(e) => patchCond({ userId: e.target.value })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="any">أي موظف</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {cond.kind === "PLATFORM_IS" && (
+            <select
+              value={cond.platform ?? "WHATSAPP"}
+              onChange={(e) => patchCond({ platform: e.target.value })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          )}
+          {cond.kind === "VAR_EQUALS" && (
+            <div className="flex items-center gap-2">
+              <Input
+                value={cond.name ?? ""}
+                onChange={(e) => patchCond({ name: e.target.value })}
+                placeholder="اسم المتغير"
+                dir="ltr"
+              />
+              <Input
+                value={cond.value ?? ""}
+                onChange={(e) => patchCond({ value: e.target.value })}
+                placeholder="القيمة"
+              />
+            </div>
+          )}
+          {cond.kind === "LAST_OUTBOUND_HOURS" && (
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                value={cond.hours ?? 24}
+                onChange={(e) =>
+                  patchCond({ hours: Math.max(1, Number(e.target.value) || 1) })
+                }
+                className="w-24"
+                dir="ltr"
+              />
+              <span className="text-xs text-muted-foreground">ساعة على الأقل منذ آخر رد منا</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-3 border-t pt-3">
         {step.type === "SEND_MESSAGE" && (
@@ -594,192 +987,158 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             <span className="text-sm text-muted-foreground">رقم الخطوة (1-based، للأمام)</span>
           </div>
         )}
+        {step.type === "SET_VAR" && (
+          <>
+            <Input
+              value={(step.name as string) ?? ""}
+              onChange={(e) => update({ name: e.target.value })}
+              placeholder="اسم المتغير (إنجليزي بدون مسافات)"
+              dir="ltr"
+            />
+            <Input
+              value={(step.value as string) ?? ""}
+              onChange={(e) => update({ value: e.target.value })}
+              placeholder="القيمة — تدعم {{name}} و{{var:الاسم}}"
+            />
+          </>
+        )}
+        {step.type === "HTTP_REQUEST" && (
+          <>
+            <Input
+              value={(step.url as string) ?? ""}
+              onChange={(e) => update({ url: e.target.value })}
+              placeholder="https://example.com/api"
+              dir="ltr"
+            />
+            <select
+              value={(step.method as string) ?? "GET"}
+              onChange={(e) => update({ method: e.target.value })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+            {((step.method as string) ?? "GET") === "POST" && (
+              <Textarea
+                value={(step.body as string) ?? ""}
+                onChange={(e) => update({ body: e.target.value })}
+                placeholder="جسم الطلب (JSON أو نص) — اختياري"
+                rows={3}
+                dir="ltr"
+              />
+            )}
+            <p className="text-xs text-muted-foreground">
+              تُخزَّن استجابة الطلب في المتغير {"{{http}}"}
+            </p>
+          </>
+        )}
+        {step.type === "AI_CLASSIFY" && (
+          <>
+            <Textarea
+              value={(step.prompt as string) ?? ""}
+              onChange={(e) => update({ prompt: e.target.value })}
+              placeholder="تعليمات تصنيف اختيارية — سياق يساعد الوكيل على التصنيف"
+              rows={2}
+            />
+            <div className="space-y-1">
+              <Label className="text-xs">الخيارات (سطر لكل خيار)</Label>
+              <Textarea
+                value={
+                  Array.isArray(step.options) ? (step.options as string[]).join("\n") : ""
+                }
+                onChange={(e) =>
+                  update({
+                    options: e.target.value
+                      .split("\n")
+                      .map((o) => o.trim())
+                      .filter(Boolean),
+                  })
+                }
+                rows={4}
+                placeholder={"مهتم\nغير مهتم\nيحتاج متابعة"}
+              />
+            </div>
+            <Input
+              value={(step.var as string) ?? ""}
+              onChange={(e) => update({ var: e.target.value })}
+              placeholder="اسم المتغير الناتج (إنجليزي)"
+              dir="ltr"
+            />
+            <p className="text-xs text-muted-foreground">
+              يُصنَّف آخر رسالة إلى أحد الخيارات ويُخزَّن في المتغير
+            </p>
+          </>
+        )}
         {step.type === "IF" &&
           (() => {
-            const cond = (step.condition as IfCondition | undefined) ?? {
-              kind: "STAGE",
-              stage: "NEW",
-            };
-            const setCond = (patch: Partial<IfCondition>) =>
-              update({ condition: { ...cond, ...patch } });
-            const days = cond.kind === "DAY_OF_WEEK" ? (cond.days ?? []) : [];
-            const toggleDay = (value: number) =>
-              setCond({
-                days: days.includes(value)
-                  ? days.filter((d) => d !== value)
-                  : [...days, value],
+            const branches = Array.isArray(step.branches)
+              ? (step.branches as IfBranchShape[])
+              : [];
+            const elseEnabled = Array.isArray(step.elseSteps);
+            const setBranchCond = (i: number, condition: IfCondition) =>
+              update({
+                branches: branches.map((b, j) => (j === i ? { ...b, condition } : b)),
               });
             return (
               <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>نوع الشرط</Label>
-                  <select
-                    value={cond.kind}
-                    onChange={(e) => {
-                      const kind = e.target.value as IfCondition["kind"];
-                      const base: IfCondition =
-                        kind === "STAGE"
-                          ? { kind: "STAGE", stage: "NEW" }
-                          : kind === "HAS_TAG"
-                            ? { kind: "HAS_TAG", tag: "" }
-                            : kind === "TEXT_CONTAINS"
-                              ? { kind: "TEXT_CONTAINS", text: "" }
-                              : kind === "DB_CONTAINS"
-                                ? { kind: "DB_CONTAINS", text: "" }
-                                : kind === "STATUS_IS"
-                                  ? { kind: "STATUS_IS", status: "AI" }
-                                  : kind === "HOURS_BETWEEN"
-                                    ? { kind: "HOURS_BETWEEN", from: 9, to: 17 }
-                                    : kind === "DAY_OF_WEEK"
-                                      ? { kind: "DAY_OF_WEEK", days: [] }
-                                      : kind === "MESSAGE_COUNT_MIN"
-                                        ? { kind: "MESSAGE_COUNT_MIN", count: 1 }
-                                        : { kind };
-                      update({ condition: base });
-                    }}
-                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-                  >
-                    <option value="STAGE">حالة العميل</option>
-                    <option value="HAS_TAG">يحمل الوسم</option>
-                    <option value="TEXT_CONTAINS">الرسالة تحتوي</option>
-                    <option value="BUSINESS_HOURS">ضمن ساعات العمل</option>
-                    <option value="DB_CONTAINS">نتيجة قاعدة البيانات تحتوي</option>
-                    <option value="HAS_ASSIGNEE">لها موظف مسند</option>
-                    <option value="STATUS_IS">حالة المحادثة</option>
-                    <option value="HOURS_BETWEEN">الساعة بين وقتين</option>
-                    <option value="DAY_OF_WEEK">يوم الأسبوع</option>
-                    <option value="MESSAGE_COUNT_MIN">عدد رسائل العميل</option>
-                    <option value="IS_CLOSED">المحادثة مغلقة</option>
-                  </select>
-                  {cond.kind === "STAGE" && (
-                    <select
-                      value={cond.stage}
-                      onChange={(e) => setCond({ stage: e.target.value })}
-                      className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-                    >
-                      {CONTACT_STAGES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {cond.kind === "HAS_TAG" && (
-                    <Input
-                      value={cond.tag}
-                      onChange={(e) => setCond({ tag: e.target.value })}
-                      placeholder="الوسم المطلوب"
-                    />
-                  )}
-                  {(cond.kind === "TEXT_CONTAINS" || cond.kind === "DB_CONTAINS") && (
-                    <Input
-                      value={cond.text}
-                      onChange={(e) => setCond({ text: e.target.value })}
-                      placeholder="النص المطلوب"
-                    />
-                  )}
-                  {cond.kind === "BUSINESS_HOURS" && (
-                    <p className="text-xs text-muted-foreground">
-                      يُضبط من صفحة التكاملات: ساعات العمل
-                    </p>
-                  )}
-                  {cond.kind === "HAS_ASSIGNEE" && (
-                    <p className="text-xs text-muted-foreground">
-                      يتحقق إذا وُجد موظف مسند للمحادثة
-                    </p>
-                  )}
-                  {cond.kind === "STATUS_IS" && (
-                    <select
-                      value={cond.status}
-                      onChange={(e) => setCond({ status: e.target.value })}
-                      className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-                    >
-                      {Object.entries(CONVERSATION_STATUS_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {cond.kind === "HOURS_BETWEEN" && (
-                    <div className="flex items-start gap-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">من ساعة</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={23}
-                          value={cond.from ?? 0}
-                          onChange={(e) =>
-                            setCond({
-                              from: Math.min(23, Math.max(0, Number(e.target.value) || 0)),
-                            })
-                          }
-                          className="w-20"
-                          dir="ltr"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">إلى ساعة</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={23}
-                          value={cond.to ?? 23}
-                          onChange={(e) =>
-                            setCond({
-                              to: Math.min(23, Math.max(0, Number(e.target.value) || 23)),
-                            })
-                          }
-                          className="w-20"
-                          dir="ltr"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {cond.kind === "DAY_OF_WEEK" && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {WEEK_DAYS.map((d) => (
-                        <button
-                          key={d.value}
-                          type="button"
-                          onClick={() => toggleDay(d.value)}
-                          className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                            days.includes(d.value)
-                              ? "border-primary bg-accent font-medium"
-                              : "hover:bg-muted"
-                          }`}
-                        >
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {cond.kind === "MESSAGE_COUNT_MIN" && (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={1}
-                        value={cond.count ?? 1}
-                        onChange={(e) =>
-                          setCond({ count: Math.max(1, Number(e.target.value) || 1) })
-                        }
-                        className="w-24"
-                        dir="ltr"
-                      />
-                      <span className="text-xs text-muted-foreground">رسالة أو أكثر</span>
-                    </div>
-                  )}
-                  {cond.kind === "IS_CLOSED" && (
-                    <p className="text-xs text-muted-foreground">
-                      يتحقق إذا كانت المحادثة مغلقة
-                    </p>
-                  )}
-                </div>
                 <p className="text-xs text-muted-foreground">
-                  عدّل خطوات الفرعين (نعم/لا) مباشرةً على اللوحة بالنقر على الأزرار أسفل
-                  بطاقة الشرط.
+                  يُنفَّذ أول فرع متحقق ثم يتجاوز الباقي — عدّل خطوات كل فرع مباشرةً على
+                  اللوحة.
                 </p>
+                {branches.map((b, i) => (
+                  <div key={i} className="space-y-1.5 rounded-lg border bg-muted/30 p-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">
+                        {i === 0 ? "الشرط 1 (إذا)" : `الشرط ${i + 1} (وإلا إذا)`}
+                      </Label>
+                      {branches.length > 1 && (
+                        <button
+                          type="button"
+                          title="حذف الفرع"
+                          onClick={() =>
+                            update({ branches: branches.filter((_, j) => j !== i) })
+                          }
+                          className="text-muted-foreground transition-colors hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    {conditionEditor(
+                      b.condition ?? { kind: "STAGE", stage: "NEW" },
+                      (c) => setBranchCond(i, c)
+                    )}
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  {branches.length < 10 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        update({
+                          branches: [
+                            ...branches,
+                            {
+                              condition: { kind: "STAGE", stage: "NEW" } satisfies IfCondition,
+                              steps: [],
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      إضافة وإلا إذا
+                    </Button>
+                  )}
+                  <Button
+                    variant={elseEnabled ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => update({ elseSteps: elseEnabled ? undefined : [] })}
+                  >
+                    {elseEnabled ? "إلغاء فرع وإلا" : "تفعيل فرع وإلا"}
+                  </Button>
+                </div>
               </div>
             );
           })()}
@@ -799,11 +1158,25 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               : "يبحث الوكيل الحالي في قاعدة معرفته المربوطة"}
           </p>
         )}
+        {(step.type === "RESUME_AI" ||
+          step.type === "ARCHIVE" ||
+          step.type === "UNARCHIVE" ||
+          step.type === "MARK_READ") && (
+          <p className="text-xs text-muted-foreground">
+            {step.type === "RESUME_AI"
+              ? "عكس إيقاف الرد الآلي — يعيد تفعيل رد الوكيل على المحادثة"
+              : step.type === "ARCHIVE"
+                ? "نقل المحادثة إلى الأرشيف"
+                : step.type === "UNARCHIVE"
+                  ? "إرجاع المحادثة من الأرشيف إلى الوارد"
+                  : "تعليم كل رسائل المحادثة كمقروءة"}
+          </p>
+        )}
       </div>
     );
   }
 
-  // سلسلة خطوات عمودية داخل مسار — كل خطوة IF تفرّع لعمودين (نعم/لا) مثل n8n
+  // سلسلة خطوات عمودية داخل مسار — كل خطوة IF تفرّع لأعمدة فروعها مثل n8n
   function StepChain({ listPath }: { listPath: number[] }) {
     const list = getListAtPath(steps, listPath);
     return (
@@ -841,12 +1214,35 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                   <Trash2 className="h-3 w-3" />
                 </button>
               </div>
-              {step.type === "IF" && (
-                <div className="flex w-full min-w-max flex-row items-start justify-center gap-4">
-                  <BranchColumn listPath={[...listPath, i, 0]} />
-                  <BranchColumn listPath={[...listPath, i, 1]} />
-                </div>
-              )}
+              {step.type === "IF" &&
+                (() => {
+                  const count = branchCountOf(step);
+                  const elseOn = Array.isArray(step.elseSteps);
+                  const total = count + (elseOn ? 1 : 0);
+                  return (
+                    <div
+                      className={`flex w-full min-w-max flex-row items-start justify-center gap-4${
+                        total > 3 ? " flex-wrap" : ""
+                      }`}
+                    >
+                      {Array.from({ length: count }, (_, b) => (
+                        <BranchColumn
+                          key={b}
+                          listPath={[...listPath, i, b]}
+                          title={b === 0 ? "إذا" : "وإلا إذا"}
+                          tone={b === 0 ? "green" : "amber"}
+                        />
+                      ))}
+                      {elseOn && (
+                        <BranchColumn
+                          listPath={[...listPath, i, count]}
+                          title="وإلا"
+                          tone="red"
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
             </div>
           );
         })}
@@ -854,19 +1250,30 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     );
   }
 
-  // عمود فرع (نعم/لا) تحت خطوة IF: ترويسة ملوّنة + سلسلة الخطوات + زر إضافة
-  function BranchColumn({ listPath }: { listPath: number[] }) {
+  // عمود فرع تحت خطوة IF: ترويسة ملوّنة + سلسلة الخطوات + زر إضافة
+  function BranchColumn({
+    listPath,
+    title,
+    tone,
+  }: {
+    listPath: number[];
+    title: string;
+    tone: "green" | "amber" | "red";
+  }) {
     const list = getListAtPath(steps, listPath);
-    const yes = listPath[listPath.length - 1] === 0;
+    const toneCls =
+      tone === "green"
+        ? "bg-green-100 text-green-700"
+        : tone === "amber"
+          ? "bg-amber-100 text-amber-700"
+          : "bg-red-100 text-red-600";
     return (
       <div className="flex w-56 shrink-0 flex-col items-center">
         <div className="h-4 w-px bg-border" />
         <span
-          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
-            yes ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
-          }`}
+          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${toneCls}`}
         >
-          {yes ? "نعم" : "لا"}
+          {title}
         </span>
         <div className="h-3 w-px bg-border" />
         <StepChain listPath={listPath} />

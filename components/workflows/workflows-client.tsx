@@ -37,13 +37,21 @@ type WorkflowRow = {
 
 type Props = { workflows: WorkflowRow[] };
 
-// عدّاد الخطوات شاملاً فروع IF المتداخلة
+// عدّاد الخطوات شاملاً فروع IF المتداخلة — يدعم الشكل الجديد (branches/elseSteps)
+// والقديم (then/else) لأن w.steps قد يكون مخزناً قبل التطبيع
 function countSteps(steps: unknown): number {
   if (!Array.isArray(steps)) return 0;
   return (steps as Record<string, unknown>[]).reduce((n, s) => {
     let c = 1;
     if (s?.type === "IF") {
-      c += countSteps(s.then) + countSteps(s["else"]);
+      if (Array.isArray(s.branches)) {
+        c += (s.branches as { steps?: unknown }[]).reduce(
+          (m, b) => m + countSteps(b.steps),
+          countSteps(s.elseSteps)
+        );
+      } else {
+        c += countSteps(s.then) + countSteps(s["else"]);
+      }
     }
     return n + c;
   }, 0);

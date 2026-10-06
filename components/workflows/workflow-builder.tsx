@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
@@ -160,7 +160,7 @@ function stepMeta(type: string) {
   );
 }
 
-function emptyStep(type: string): Step {
+function emptyStepBase(type: string): Step {
   switch (type) {
     case "SEND_MESSAGE":
       return { type, body: "" };
@@ -188,7 +188,7 @@ function emptyStep(type: string): Step {
     case "CREATE_BOOKING":
       return { type, title: "", scheduledAt: "", notes: "" };
     case "GOTO":
-      return { type, step: 1 };
+      return { type, targetId: "" };
     case "SET_VAR":
       return { type, name: "", value: "" };
     case "HTTP_REQUEST":
@@ -209,6 +209,11 @@ function emptyStep(type: string): Step {
     default:
       return { type };
   }
+}
+
+// كل خطوة تحمل معرفاً ثابتاً — GOTO يستهدف الخطوات به
+function emptyStep(type: string): Step {
+  return { ...emptyStepBase(type), id: crypto.randomUUID() };
 }
 
 // شرط افتراضي عند تبديل نوع الشرط في محرر IF
@@ -290,7 +295,9 @@ function conditionSummary(
 // نسخة محلية خالصة من normalizeSteps في lib/workflows (لا تُستورد تلك الوحدة
 // هنا لأنها تجذب prisma ووحدات خادم إلى حزمة المتصفح)
 function normalizeStepsShape(steps: Step[]): Step[] {
-  return steps.map((step) => {
+  return steps.map((raw) => {
+    const step: Step =
+      typeof raw.id === "string" && raw.id ? raw : { ...raw, id: crypto.randomUUID() };
     if (step.type !== "IF") return step;
     if (Array.isArray(step.branches)) {
       return {
@@ -325,7 +332,7 @@ function normalizeStepsShape(steps: Step[]): Step[] {
 }
 
 // ملخص الخطوة المعروض داخل بطاقة العقدة
-function stepSummary(step: Step, members: { id: string; name: string }[], templates: { id: string; name: string }[], agents: { id: string; name: string }[] = [], dbSources: { id: string; title: string }[] = []): string {
+function stepSummary(step: Step, members: { id: string; name: string }[], templates: { id: string; name: string }[], agents: { id: string; name: string }[] = [], dbSources: { id: string; title: string }[] = [], sameList: Step[] = []): string {
   switch (step.type) {
     case "SEND_MESSAGE": {
       const templateId = step.templateId as string | undefined;
@@ -335,7 +342,11 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
       return ((step.body as string) || "بدون نص").slice(0, 60);
     }
     case "SEND_MEDIA":
-      return (step.caption as string) || ((step.url as string) || "—").slice(0, 50);
+      return (
+        (step.assetName as string) ||
+        (step.caption as string) ||
+        ((step.url as string) || "—").slice(0, 50)
+      );
     case "REQUEST_LOCATION":
       return (step.prompt as string) || "طلب الموقع من العميل";
     case "ASSIGN":
@@ -367,8 +378,11 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
       return `${step.minutes} دقيقة ثم تُستأنف الخطوات`;
     case "WEBHOOK":
       return ((step.url as string) || "—").slice(0, 50);
-    case "GOTO":
-      return `إلى الخطوة ${step.step ?? 1}`;
+    case "GOTO": {
+      const target = sameList.find((s) => s.id === step.targetId);
+      if (!target || target.type === "GOTO") return "→ خطوة";
+      return `→ ${stepSummary(target, members, templates, agents, dbSources, sameList)}`;
+    }
     case "RESUME_AI":
       return "إعادة تفعيل الرد الآلي";
     case "ARCHIVE":
@@ -515,6 +529,192 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         : s
     );
   }
+
+  function replaceListAtPath(root: Step[], listPath: number[], list: Step[]): Step[] {
+    if (listPath.length === 0) return list;
+    const [index, branch, ...rest] = listPath;
+    return root.map((s, i) =>
+      i === index
+        ? replaceBranchList(
+            s,
+            branch,
+            replaceListAtPath(branchListOf(s, branch), rest, list)
+          )
+        : s
+    );
+  }
+
+  // سحب وإفلات: نقل خطوة لتسبق بطاقة الهدف — بين القوائم أو ضمن نفسها
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  function isInsideOwnBranches(srcPath: number[], targetPath: number[]): boolean {
+    const src = srcPath.join(",");
+    const tgt = targetPath.join(",");
+    return tgt === src || tgt.startsWith(src + ",");
+  }
+
+  // تصحيح مسار قائمة بعد حذف عنصر من قائمة المصدر: أي فهرس زوجي في المسار
+  // يشير إلى قائمة المصدر وكان بعد العنصر المحذوف يتقدم بمقدار واحد
+  function adjustListPathForRemoval(
+    listPath: number[],
+    srcListPath: number[],
+    srcIndex: number
+  ): number[] {
+    const srcKey = srcListPath.join(",");
+    const result = [...listPath];
+    for (let d = 0; d + 1 < result.length; d += 2) {
+      if (result.slice(0, d).join(",") === srcKey && result[d] > srcIndex) {
+        result[d] -= 1;
+      }
+    }
+    return result;
+  }
+
+  function moveStepBefore(srcPath: number[], targetPath: number[]) {
+    if (srcPath.join(",") === targetPath.join(",")) return;
+    if (isInsideOwnBranches(srcPath, targetPath)) return;
+    setSteps((prev) => {
+      const step = getStepAtPath(prev, srcPath);
+      if (!step) return prev;
+      const srcListPath = srcPath.slice(0, -1);
+      const tgtListPath = targetPath.slice(0, -1);
+      const srcIndex = srcPath[srcPath.length - 1];
+      let tgtIndex = targetPath[targetPath.length - 1];
+      const next = removeStepAtPath(prev, srcPath);
+      const adjustedTgtListPath = adjustListPathForRemoval(
+        tgtListPath,
+        srcListPath,
+        srcIndex
+      );
+      // الهدف في قائمة المصدر نفسها: فهرسه يتقدم إذا كان المصدر قبله
+      if (
+        adjustedTgtListPath.join(",") === srcListPath.join(",") &&
+        srcIndex < tgtIndex
+      ) {
+        tgtIndex -= 1;
+      }
+      const list = getListAtPath(next, adjustedTgtListPath);
+      return replaceListAtPath(next, adjustedTgtListPath, [
+        ...list.slice(0, tgtIndex),
+        step,
+        ...list.slice(tgtIndex),
+      ]);
+    });
+  }
+
+  function moveStepToEnd(srcPath: number[], listPath: number[]) {
+    if (isInsideOwnBranches(srcPath, listPath)) return;
+    setSteps((prev) => {
+      const step = getStepAtPath(prev, srcPath);
+      if (!step) return prev;
+      const next = removeStepAtPath(prev, srcPath);
+      const adjusted = adjustListPathForRemoval(
+        listPath,
+        srcPath.slice(0, -1),
+        srcPath[srcPath.length - 1]
+      );
+      const list = getListAtPath(next, adjusted);
+      return replaceListAtPath(next, adjusted, [...list, step]);
+    });
+  }
+
+  // رفع ملف وسائط لخطوة SEND_MEDIA
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  async function uploadAsset(file: File, apply: (patch: Partial<Step>) => void) {
+    setUploading(true);
+    setUploadError("");
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch("/api/assets", { method: "POST", body: form });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.id) {
+        setUploadError(data?.error ?? "فشل الرفع — حاول مجدداً");
+        return;
+      }
+      apply({ assetId: data.id, assetName: data.filename, assetMime: data.mime, url: "" });
+    } catch {
+      setUploadError("فشل الرفع — تحقق من الاتصال");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // أسهم GOTO: طبقة SVG فوق البطاقات مع مراجع العناصر بالمسار
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef(new Map<string, HTMLElement>());
+  const [arrows, setArrows] = useState<{ key: string; d: string }[]>([]);
+
+  function collectGotoPairs(): { src: string; tgt: string }[] {
+    const pairs: { src: string; tgt: string }[] = [];
+    function walk(listPath: number[]) {
+      const list = getListAtPath(steps, listPath);
+      list.forEach((s, i) => {
+        if (s.type === "IF") {
+          const count = branchCountOf(s);
+          for (let b = 0; b < count; b++) walk([...listPath, i, b]);
+          if (Array.isArray(s.elseSteps)) walk([...listPath, i, count]);
+        }
+      });
+      list.forEach((s, i) => {
+        const targetId = s.targetId as string | undefined;
+        if (s.type === "GOTO" && typeof targetId === "string" && targetId) {
+          const t = list.findIndex((x) => x.id === targetId);
+          if (t >= 0) {
+            pairs.push({
+              src: [...listPath, i].join(","),
+              tgt: [...listPath, t].join(","),
+            });
+          }
+        }
+      });
+    }
+    walk([]);
+    return pairs;
+  }
+
+  const drawArrows = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const cRect = container.getBoundingClientRect();
+    const next: { key: string; d: string }[] = [];
+    for (const { src, tgt } of collectGotoPairs()) {
+      const srcEl = cardRefs.current.get(src);
+      const tgtEl = cardRefs.current.get(tgt);
+      if (!srcEl || !tgtEl) continue;
+      const sr = srcEl.getBoundingClientRect();
+      const tr = tgtEl.getBoundingClientRect();
+      const x1 = sr.left + sr.width / 2 - cRect.left;
+      const y1 = sr.bottom - cRect.top;
+      const x2 = tr.left + tr.width / 2 - cRect.left;
+      const y2 = tr.top - cRect.top - 4;
+      const dy = Math.max((y2 - y1) / 2, 24);
+      next.push({
+        key: `${src}->${tgt}`,
+        d: `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`,
+      });
+    }
+    setArrows(next);
+  }, [steps]);
+
+  useLayoutEffect(() => {
+    drawArrows();
+  }, [drawArrows]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onScroll = () => drawArrows();
+    container.addEventListener("scroll", onScroll);
+    const ro = new ResizeObserver(() => drawArrows());
+    ro.observe(container);
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+  }, [drawArrows]);
 
   function addKeyword() {
     const k = keywordInput.trim();
@@ -887,19 +1087,95 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           />
         )}
         {step.type === "SEND_MEDIA" && (
-          <>
-            <Input
-              value={(step.url as string) ?? ""}
-              onChange={(e) => update({ url: e.target.value })}
-              placeholder="https://… (رابط مباشر لصورة/فيديو/PDF)"
-              dir="ltr"
-            />
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant={!step.url ? "secondary" : "outline"}
+                size="sm"
+                onClick={() =>
+                  update({ url: "" })
+                }
+              >
+                رفع ملف
+              </Button>
+              <Button
+                variant={step.url ? "secondary" : "outline"}
+                size="sm"
+                onClick={() =>
+                  update({ url: (step.url as string) ?? "", assetId: undefined, assetName: undefined, assetMime: undefined })
+                }
+              >
+                رابط مباشر
+              </Button>
+            </div>
+            {(step.assetId as string) ? (
+              <div className="space-y-1.5 rounded-lg border bg-muted/30 p-2">
+                {(step.assetMime as string)?.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/assets/${step.assetId}`}
+                    alt={(step.assetName as string) ?? ""}
+                    className="max-h-36 rounded-md"
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    ملف: {(step.assetName as string) ?? "—"}
+                  </p>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <p className="flex-1 truncate text-xs text-muted-foreground" dir="ltr">
+                    {(step.assetName as string) ?? ""}
+                  </p>
+                  <button
+                    type="button"
+                    title="إزالة الملف"
+                    onClick={() =>
+                      update({ assetId: undefined, assetName: undefined, assetMime: undefined })
+                    }
+                    className="text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : step.url ? (
+              <Input
+                value={(step.url as string) ?? ""}
+                onChange={(e) => update({ url: e.target.value })}
+                placeholder="https://… (رابط مباشر لصورة/فيديو/PDF)"
+                dir="ltr"
+              />
+            ) : (
+              <div className="space-y-1.5">
+                <Input
+                  type="file"
+                  accept="image/*,video/*,audio/*,application/pdf"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadAsset(file, update);
+                    e.target.value = "";
+                  }}
+                />
+                {uploading && (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    جارٍ الرفع…
+                  </p>
+                )}
+                {uploadError && (
+                  <p className="text-xs text-red-600" role="alert">
+                    {uploadError}
+                  </p>
+                )}
+              </div>
+            )}
             <Input
               value={(step.caption as string) ?? ""}
               onChange={(e) => update({ caption: e.target.value })}
               placeholder="تسمية اختيارية للوسائط"
             />
-          </>
+          </div>
         )}
         {step.type === "REQUEST_LOCATION" && (
           <Input
@@ -973,18 +1249,26 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           </>
         )}
         {step.type === "GOTO" && (
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              min={1}
-              value={(step.step as number) ?? 1}
-              onChange={(e) =>
-                update({ step: Math.max(1, Number(e.target.value) || 1) })
-              }
-              className="w-28"
-              dir="ltr"
-            />
-            <span className="text-sm text-muted-foreground">رقم الخطوة (1-based، للأمام)</span>
+          <div className="space-y-1.5">
+            <select
+              value={(step.targetId as string) ?? ""}
+              onChange={(e) => update({ targetId: e.target.value || undefined })}
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">اختر الخطوة الهدف…</option>
+              {getListAtPath(steps, path.slice(0, -1))
+                .map((s, idx) => ({ s, idx }))
+                .filter(({ s }) => s.type !== "GOTO")
+                .map(({ s, idx }) => (
+                  <option key={(s.id as string) ?? idx} value={(s.id as string) ?? ""}>
+                    #{idx + 1} —{" "}
+                    {stepSummary(s, members, templates, agents, dbSources)}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              قفزة إلى خطوة لاحقة في نفس المستوى فقط
+            </p>
           </div>
         )}
         {step.type === "SET_VAR" && (
@@ -1184,14 +1468,43 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {list.map((step, i) => {
           const meta = stepMeta(step.type);
           const stepPath = [...listPath, i];
+          const key = stepPath.join(",");
           return (
             <div key={i} className="flex w-full flex-col items-center">
               <div className="h-6 w-px bg-border" />
-              <div className="relative w-full">
+              <div
+                ref={(el) => {
+                  if (el) cardRefs.current.set(key, el);
+                  else cardRefs.current.delete(key);
+                }}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", key);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragEnd={() => setDropTarget(null)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDropTarget(key);
+                }}
+                onDragLeave={() => setDropTarget((t) => (t === key ? null : t))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const src = e.dataTransfer.getData("text/plain");
+                  setDropTarget(null);
+                  if (src) moveStepBefore(src.split(",").map(Number), stepPath);
+                }}
+                className={`relative w-full rounded-xl border-2 transition-colors ${
+                  dropTarget === key
+                    ? "border-blue-500 border-dashed"
+                    : "border-blue-400"
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setEditor({ path: stepPath, isNew: false })}
-                  className="w-full rounded-xl border-2 border-blue-400 bg-background p-4 text-start shadow-sm transition-shadow hover:shadow-md"
+                  className="w-full cursor-grab rounded-[10px] bg-background p-4 text-start shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
@@ -1201,7 +1514,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                   </div>
                   <p className="mt-1 font-medium">{meta.label}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                    {stepSummary(step, members, templates, agents, dbSources)}
+                    {stepSummary(step, members, templates, agents, dbSources, list)}
                   </p>
                   <p className="mt-2 text-xs text-blue-500">انقر للتعديل</p>
                 </button>
@@ -1261,6 +1574,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     tone: "green" | "amber" | "red";
   }) {
     const list = getListAtPath(steps, listPath);
+    const endKey = `end:${listPath.join(",")}`;
     const toneCls =
       tone === "green"
         ? "bg-green-100 text-green-700"
@@ -1280,7 +1594,22 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {list.length === 0 && (
           <>
             <div className="h-2 w-px bg-border" />
-            <div className="w-full rounded-lg border border-dashed p-3 text-center text-[10px] text-muted-foreground">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDropTarget(endKey);
+              }}
+              onDragLeave={() => setDropTarget((t) => (t === endKey ? null : t))}
+              onDrop={(e) => {
+                e.preventDefault();
+                const src = e.dataTransfer.getData("text/plain");
+                setDropTarget(null);
+                if (src) moveStepToEnd(src.split(",").map(Number), listPath);
+              }}
+              className={`w-full rounded-lg border border-dashed p-3 text-center text-[10px] text-muted-foreground transition-colors ${
+                dropTarget === endKey ? "border-blue-500" : ""
+              }`}
+            >
               لا خطوات — أضف من الزر بالأسفل
             </div>
           </>
@@ -1289,7 +1618,20 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         <button
           type="button"
           onClick={() => setEditor({ path: listPath, isNew: true })}
-          className="flex items-center justify-center gap-1 rounded-lg border-2 border-dashed border-muted-foreground/40 px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDropTarget(endKey);
+          }}
+          onDragLeave={() => setDropTarget((t) => (t === endKey ? null : t))}
+          onDrop={(e) => {
+            e.preventDefault();
+            const src = e.dataTransfer.getData("text/plain");
+            setDropTarget(null);
+            if (src) moveStepToEnd(src.split(",").map(Number), listPath);
+          }}
+          className={`flex items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary ${
+            dropTarget === endKey ? "border-blue-500 text-primary" : "border-muted-foreground/40"
+          }`}
         >
           <Plus className="h-3 w-3" />
           إضافة خطوة
@@ -1327,48 +1669,90 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
       </div>
 
       {/* الـ Canvas */}
-      <div className="relative flex-1 overflow-auto">
-        {/* خلفية منقّطة */}
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: "radial-gradient(circle, #d4d4d8 1.2px, transparent 1.2px)",
-            backgroundSize: "22px 22px",
-          }}
-        />
-        <div className="relative z-10 mx-auto flex w-fit min-w-[560px] flex-col items-center py-10">
-          {/* عقدة المحفّز */}
-          <button
-            type="button"
-            onClick={() => setConditionsOpen(true)}
-            className="w-full rounded-xl border-2 border-green-500 bg-green-50/70 p-4 text-start shadow-sm transition-shadow hover:shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">المُحفِّز</span>
-              <Zap className="h-4 w-4 text-green-600" />
-            </div>
-            <p className="mt-1 font-medium">{triggerLabels[trigger]}</p>
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {triggerSummary()}
-            </p>
-            <p className="mt-2 text-xs text-green-600">انقر للتعديل</p>
-          </button>
+      <div className="relative flex-1 overflow-hidden">
+        <div ref={containerRef} className="absolute inset-0 overflow-auto">
+          {/* خلفية منقّطة */}
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: "radial-gradient(circle, #d4d4d8 1.2px, transparent 1.2px)",
+              backgroundSize: "22px 22px",
+            }}
+          />
+          <div className="relative z-10 mx-auto flex w-fit min-w-[560px] flex-col items-center py-10">
+            {/* عقدة المحفّز */}
+            <button
+              type="button"
+              onClick={() => setConditionsOpen(true)}
+              className="w-full rounded-xl border-2 border-green-500 bg-green-50/70 p-4 text-start shadow-sm transition-shadow hover:shadow-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">المُحفِّز</span>
+                <Zap className="h-4 w-4 text-green-600" />
+              </div>
+              <p className="mt-1 font-medium">{triggerLabels[trigger]}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {triggerSummary()}
+              </p>
+              <p className="mt-2 text-xs text-green-600">انقر للتعديل</p>
+            </button>
 
-          {/* الخطوات — سلسلة رئيسية تتفرع مرئياً عند كل IF */}
-          <div className="h-6 w-px bg-border" />
-          <StepChain listPath={[]} />
+            {/* الخطوات — سلسلة رئيسية تتفرع مرئياً عند كل IF */}
+            <div className="h-6 w-px bg-border" />
+            <StepChain listPath={[]} />
 
-          {/* إضافة خطوة */}
-          <div className="h-6 w-px bg-border" />
-          <button
-            type="button"
-            onClick={() => setEditor({ path: [], isNew: true })}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-muted-foreground/40 p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-          >
-            <Plus className="h-4 w-4" />
-            إضافة خطوة
-          </button>
+            {/* إضافة خطوة */}
+            <div className="h-6 w-px bg-border" />
+            <button
+              type="button"
+              onClick={() => setEditor({ path: [], isNew: true })}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDropTarget("end:");
+              }}
+              onDragLeave={() => setDropTarget((t) => (t === "end:" ? null : t))}
+              onDrop={(e) => {
+                e.preventDefault();
+                const src = e.dataTransfer.getData("text/plain");
+                setDropTarget(null);
+                if (src) moveStepToEnd(src.split(",").map(Number), []);
+              }}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary ${
+                dropTarget === "end:" ? "border-blue-500 text-primary" : "border-muted-foreground/40"
+              }`}
+            >
+              <Plus className="h-4 w-4" />
+              إضافة خطوة
+            </button>
+          </div>
         </div>
+
+        {/* أسهم GOTO — طبقة فوق البطاقات لا تلتقط الأحداث */}
+        <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full">
+          <defs>
+            <marker
+              id="goto-arrow"
+              markerWidth="8"
+              markerHeight="8"
+              refX="7"
+              refY="4"
+              orient="auto"
+            >
+              <path d="M0,0 L8,4 L0,8 z" fill="#6366f1" />
+            </marker>
+          </defs>
+          {arrows.map((a) => (
+            <path
+              key={a.key}
+              d={a.d}
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth={2}
+              strokeDasharray="6 4"
+              markerEnd="url(#goto-arrow)"
+            />
+          ))}
+        </svg>
       </div>
 
       {/* لوحة الشروط الجانبية */}

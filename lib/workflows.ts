@@ -42,7 +42,7 @@ export type IfBranch = { condition: IfCondition; steps: WorkflowStep[] };
 // الخطوات متداخلة عبر IF: لكل شرط فرعان then/else وكل منهما قائمة خطوات
 export type WorkflowStep =
   | { type: "SEND_MESSAGE"; body: string; templateId?: string }
-  | { type: "SEND_MEDIA"; url: string; caption?: string } // صورة/فيديو/PDF من رابط مباشر
+  | { type: "SEND_MEDIA"; url?: string; assetId?: string; assetName?: string; caption?: string } // صورة/فيديو/PDF من رابط أو ملف مرفوع
   | { type: "REQUEST_LOCATION"; prompt?: string } // طلب مشاركة الموقع (مزود ميتا فقط)
   | { type: "ASSIGN"; userId: string } // "any" تعني أول عضو متاح في الفريق
   | { type: "SET_AGENT"; agentId: string } // ربط المحادثة بوكيل ذكي محدد
@@ -58,7 +58,7 @@ export type WorkflowStep =
   | { type: "REOPEN" } // إعادة فتح محادثة مغلقة
   | { type: "WAIT"; minutes: number }
   | { type: "WEBHOOK"; url: string }
-  | { type: "GOTO"; step: number } // قفز للأمام إلى رقم خطوة (1-based) في نفس المستوى
+  | { type: "GOTO"; targetId?: string; step?: number } // انتقال مرسوم بسهم إلى خطوة في نفس المستوى (للأمام فقط)
   | { type: "CREATE_BOOKING"; title: string; scheduledAt: string; notes?: string }
   | { type: "RESUME_AI" } // إعادة تفعيل الرد الآلي للمحادثة (عكس STOP_AI)
   | { type: "ARCHIVE" } // أرشفة المحادثة
@@ -110,6 +110,12 @@ export function normalizeSteps(steps: WorkflowStep[]): WorkflowStep[] {
   });
 }
 
+// معرّف كل خطوة — تولّده الواجهة عند الإنشاء وتخزنه في عنصر JSON
+// لازم لأسهم الانتقال: GOTO يشير به إلى الخطوة الهدف بدل الرقم المتقلب
+export function stepId(step: WorkflowStep): string | undefined {
+  return (step as { id?: string }).id;
+}
+
 // إعدادات المحفّز حسب نوعه
 export type TriggerConfig =
   | { keywords: string[] } // KEYWORD
@@ -150,7 +156,7 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "WAIT", label: "انتظار (تأخير)" },
   { type: "WEBHOOK", label: "Webhook خارجي" },
   { type: "CREATE_BOOKING", label: "إنشاء حجز موعد" },
-  { type: "GOTO", label: "القفز إلى خطوة (للأمام)" },
+  { type: "GOTO", label: "انتقال إلى خطوة (سهم)" },
   { type: "SET_VAR", label: "تعيين متغير" },
   { type: "HTTP_REQUEST", label: "طلب HTTP عام" },
   { type: "AI_CLASSIFY", label: "تصنيف بالذكاء الاصطناعي" },
@@ -286,8 +292,11 @@ export function validateSteps(
           }
           break;
         case "SEND_MEDIA":
-          if (!/^https?:\/\//.test(step.url ?? "")) {
-            errors.push(`${label}: رابط الوسائط يجب أن يبدأ بـ http(s)://`);
+          if (!step.url?.trim() && !step.assetId?.trim()) {
+            errors.push(`${label}: ارفع ملفاً أو أدخل رابط وسائط`);
+          }
+          if (step.url?.trim() && !/^https?:\/\//.test(step.url)) {
+            errors.push(`${label}: الرابط يجب أن يبدأ بـ http(s)://`);
           }
           break;
         case "ASSIGN":
@@ -345,17 +354,24 @@ export function validateSteps(
           }
           break;
         }
-        case "GOTO":
-          if (
+        case "GOTO": {
+          // شكل جديد: targetId (معرف الخطوة الهدف) — شكل قديم: رقم الخطوة
+          if (step.targetId?.trim()) {
+            const exists = list.some((s) => stepId(s) === step.targetId);
+            if (!exists) {
+              errors.push(`${label}: خطوة الهدف غير موجودة في نفس المستوى`);
+            }
+          } else if (
             !Number.isInteger(step.step) ||
-            step.step < 1 ||
-            step.step > list.length
+            step.step! < 1 ||
+            step.step! > list.length
           ) {
             errors.push(
-              `${label}: القفز إلى خطوة بين 1 و${list.length} في نفس المستوى (للأمام)`
+              `${label}: حدد الخطوة الهدف — القفز للأمام ضمن نفس المستوى`
             );
           }
           break;
+        }
         case "WAIT":
           if (
             typeof step.minutes !== "number" ||
@@ -476,23 +492,41 @@ function mimeFromUrl(url: string): string {
   return map[ext] ?? "application/octet-stream";
 }
 
-// إرسال وسائط من رابط مباشر: تنزيل ثم إرسال عبر المزود (رفع مسبق لميتا / base64 لـ UltraMsg)
+// إرسال وسائط: من ملف مرفوع (assetId) أو من رابط مباشر
 async function sendWorkflowMedia(
   ctx: WorkflowContext,
-  url: string,
+  media: { url?: string; assetId?: string },
   caption?: string
 ): Promise<void> {
   const creds = await resolveWhatsAppCreds(ctx.workspaceId);
   if (!creds) throw new Error("لا يوجد مزود واتساب مُعدّ");
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`تعذّر تنزيل الوسائط — الحالة ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.length === 0) throw new Error("الملف المحمّل فارغ");
+  let buffer: Buffer;
+  let mime: string;
+  let filename: string;
+
+  if (media.assetId?.trim()) {
+    const asset = await prisma.mediaAsset.findFirst({
+      where: { id: media.assetId, workspaceId: ctx.workspaceId },
+    });
+    if (!asset) throw new Error("الملف المرفوع غير موجود");
+    buffer = Buffer.from(asset.dataBase64, "base64");
+    mime = asset.mime;
+    filename = asset.filename;
+  } else if (media.url?.trim()) {
+    const res = await fetch(media.url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`تعذّر تنزيل الوسائط — الحالة ${res.status}`);
+    buffer = Buffer.from(await res.arrayBuffer());
+    mime =
+      res.headers.get("content-type")?.split(";")[0]?.trim() || mimeFromUrl(media.url);
+    filename = decodeURIComponent(media.url.split("?")[0].split("/").pop() || "ملف");
+  } else {
+    throw new Error("لا يوجد ملف أو رابط وسائط");
+  }
+
+  if (buffer.length === 0) throw new Error("الملف فارغ");
   if (buffer.length > 16 * 1024 * 1024) throw new Error("حجم الملف يتجاوز 16MB");
 
-  const mime = res.headers.get("content-type")?.split(";")[0]?.trim() || mimeFromUrl(url);
-  const filename = decodeURIComponent(url.split("?")[0].split("/").pop() || "ملف");
   const mediaType = mediaTypeForMime(mime);
 
   let sent: boolean;
@@ -727,7 +761,7 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       await sendWorkflowMessage(ctx, step.body, step.templateId);
       return "أُرسلت الرسالة";
     case "SEND_MEDIA":
-      await sendWorkflowMedia(ctx, step.url, step.caption);
+      await sendWorkflowMedia(ctx, { url: step.url, assetId: step.assetId }, step.caption);
       return "أُرسلت الوسائط";
     case "REQUEST_LOCATION": {
       const creds = await resolveWhatsAppCreds(ctx.workspaceId);
@@ -1105,13 +1139,20 @@ export async function executeWorkflow(
     }
 
     if (step.type === "GOTO") {
-      // قفز للأمام فقط وضمن نفس المستوى — يمنع الحلقات اللانهائية
-      if (step.step >= frame.index + 1 && step.step <= frame.steps.length) {
-        frame.index = step.step - 1;
-        logs.push(`↷ GOTO → الخطوة ${step.step}`);
+      // الانتقال المرسوم بسهم: نحوّل targetId إلى فهرس ضمن القائمة الحالية
+      // القفز للأمام فقط — يمنع الحلقات اللانهائية
+      let targetIndex = -1;
+      if (step.targetId?.trim()) {
+        targetIndex = frame.steps.findIndex((s) => stepId(s) === step.targetId);
+      } else if (Number.isInteger(step.step)) {
+        targetIndex = step.step! - 1; // الشكل القديم برقم الخطوة
+      }
+      if (targetIndex >= frame.index && targetIndex < frame.steps.length) {
+        frame.index = targetIndex;
+        logs.push(`↷ انتقال → ${step.targetId?.trim() ? "الخطوة المحددة" : `الخطوة ${targetIndex + 1}`}`);
       } else {
         failed = true;
-        logs.push(`✗ GOTO: الخطوة ${step.step} ليست للأمام أو خارج النطاق`);
+        logs.push(`✗ GOTO: الهدف ليس للأمام أو غير موجود في نفس المستوى`);
       }
       continue;
     }

@@ -6,6 +6,7 @@ import {
   resolveWhatsAppCreds,
   sendWhatsAppMedia,
   uploadWhatsAppMedia,
+  getLastWhatsAppError,
 } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 
@@ -68,7 +69,11 @@ export async function POST(req: Request, { params }: Params) {
       creds
     );
     if (!mediaId) {
-      return NextResponse.json({ error: "فشل رفع الملف إلى ميتا" }, { status: 502 });
+      const detail = getLastWhatsAppError();
+      return NextResponse.json(
+        { error: "فشل رفع الملف إلى ميتا" + (detail ? ` — ${detail}` : "") },
+        { status: 502 }
+      );
     }
   }
 
@@ -119,6 +124,8 @@ export async function POST(req: Request, { params }: Params) {
         senderName: null,
       },
       waSent,
+      // سبب فشل الإرسال إلى واتساب إن وجد — ليظهر للمستخدم في التنبيه
+      waError: waSent ? null : getLastWhatsAppError(),
     },
     { status: 201 }
   );

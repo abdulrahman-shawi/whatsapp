@@ -260,7 +260,10 @@ export function InboxClient({
     if (res.ok) {
       const data = await res.json();
       if (data.waSent === false) {
-        alert("حُفظت الرسالة لكن فشل إرسالها إلى واتساب — تحقق من إعدادات UltraMsg/ميتا");
+        alert(
+          "حُفظت الرسالة لكن فشل إرسالها إلى واتساب" +
+            (data.waError ? `\n\nالسبب: ${data.waError}` : " — تحقق من إعدادات UltraMsg/ميتا")
+        );
       }
       setMessages((prev) => [...prev, data.message]);
       lastTsRef.current = data.message.createdAt;

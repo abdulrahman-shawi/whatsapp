@@ -5,6 +5,18 @@ export type WhatsAppCreds =
   | { provider: "meta"; token: string; phoneNumberId: string }
   | { provider: "ultramsg"; instanceId: string; token: string };
 
+// آخر خطأ مفصّل من مزود واتساب (جسم الرد الفعلي) — لتشخيص أعطال الإرسال
+let lastError: string | null = null;
+export function getLastWhatsAppError(): string | null {
+  return lastError;
+}
+
+// بناء وصف خطأ من استجابة المزود: الحالة + أول 300 حرف من الجسم
+async function failDetail(provider: string, res: Response): Promise<string> {
+  const body = (await res.text().catch(() => "")).slice(0, 300);
+  return `${provider} — الحالة ${res.status}: ${body}`;
+}
+
 // حلّ مزوّد واتساب لمساحة العمل: Meta إن اكتملت حقوله، وإلا UltraMsg
 export async function resolveWhatsAppCreds(
   workspaceId: string
@@ -30,6 +42,7 @@ export async function sendWhatsAppMessage(
   body: string,
   creds: WhatsAppCreds | null
 ): Promise<boolean> {
+  lastError = null;
   if (!creds) return false;
   return creds.provider === "meta"
     ? sendViaMeta(to, body, creds)
@@ -58,8 +71,10 @@ async function sendViaMeta(
         }),
       }
     );
+    if (!res.ok) lastError = await failDetail("ميتا", res);
     return res.ok;
-  } catch {
+  } catch (e) {
+    lastError = `ميتا — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }
@@ -82,12 +97,20 @@ async function sendViaUltraMsg(
         }),
       }
     );
-    if (!res.ok) return false;
+    if (!res.ok) {
+      lastError = await failDetail("UltraMsg", res);
+      return false;
+    }
     const data = (await res.json().catch(() => null)) as {
       sent?: string | boolean;
     } | null;
-    return data?.sent === true || data?.sent === "true";
-  } catch {
+    if (!(data?.sent === true || data?.sent === "true")) {
+      lastError = `UltraMsg — الرد: ${JSON.stringify(data).slice(0, 300)}`;
+      return false;
+    }
+    return true;
+  } catch (e) {
+    lastError = `UltraMsg — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }
@@ -105,6 +128,7 @@ export async function uploadWhatsAppMedia(
   file: { buffer: Buffer; mime: string; filename: string },
   creds: WhatsAppCreds | null
 ): Promise<string | null> {
+  lastError = null;
   if (!creds || creds.provider !== "meta") return null;
   try {
     const form = new FormData();
@@ -123,10 +147,14 @@ export async function uploadWhatsAppMedia(
         body: form,
       }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      lastError = await failDetail("ميتا (رفع وسائط)", res);
+      return null;
+    }
     const data = (await res.json().catch(() => null)) as { id?: string } | null;
     return data?.id ?? null;
-  } catch {
+  } catch (e) {
+    lastError = `ميتا (رفع وسائط) — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return null;
   }
 }
@@ -145,6 +173,7 @@ export async function sendWhatsAppMedia(
   },
   creds: WhatsAppCreds | null
 ): Promise<boolean> {
+  lastError = null;
   if (!creds) return false;
   return creds.provider === "meta"
     ? sendMediaViaMeta(to, media, creds)
@@ -193,8 +222,10 @@ async function sendMediaViaMeta(
         body: JSON.stringify(payload),
       }
     );
+    if (!res.ok) lastError = await failDetail("ميتا (وسائط)", res);
     return res.ok;
-  } catch {
+  } catch (e) {
+    lastError = `ميتا (وسائط) — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }
@@ -231,12 +262,20 @@ async function sendMediaViaUltraMsg(
         body: params,
       }
     );
-    if (!res.ok) return false;
+    if (!res.ok) {
+      lastError = await failDetail("UltraMsg", res);
+      return false;
+    }
     const data = (await res.json().catch(() => null)) as {
       sent?: string | boolean;
     } | null;
-    return data?.sent === true || data?.sent === "true";
-  } catch {
+    if (!(data?.sent === true || data?.sent === "true")) {
+      lastError = `UltraMsg — الرد: ${JSON.stringify(data).slice(0, 300)}`;
+      return false;
+    }
+    return true;
+  } catch (e) {
+    lastError = `UltraMsg — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }
@@ -269,8 +308,10 @@ export async function sendWhatsAppLocationRequest(
         }),
       }
     );
+    if (!res.ok) lastError = await failDetail("ميتا (طلب موقع)", res);
     return res.ok;
-  } catch {
+  } catch (e) {
+    lastError = `ميتا (طلب موقع) — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }
@@ -281,6 +322,7 @@ export async function sendWhatsAppTemplate(
   template: { name: string; language: string; params: string[] },
   creds: WhatsAppCreds | null
 ): Promise<boolean> {
+  lastError = null;
   if (!creds || creds.provider !== "meta") return false;
   try {
     const body: Record<string, unknown> = {
@@ -315,8 +357,10 @@ export async function sendWhatsAppTemplate(
         body: JSON.stringify(body),
       }
     );
+    if (!res.ok) lastError = await failDetail("ميتا (قالب)", res);
     return res.ok;
-  } catch {
+  } catch (e) {
+    lastError = `ميتا (قالب) — استثناء: ${e instanceof Error ? e.message.slice(0, 200) : "شبكة"}`;
     return false;
   }
 }

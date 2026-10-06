@@ -8,6 +8,7 @@ import {
   sendWhatsAppLocationRequest,
   uploadWhatsAppMedia,
   mediaTypeForMime,
+  getLastWhatsAppError,
 } from "@/lib/whatsapp";
 import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { collectAgentKnowledge } from "@/lib/retrieval";
@@ -472,7 +473,12 @@ async function sendWorkflowMessage(
       data: { lastMessageAt: new Date() },
     });
   }
-  if (!sent) throw new Error("فشل إرسال الرسالة عبر مزود واتساب");
+  if (!sent) {
+    const detail = getLastWhatsAppError();
+    throw new Error(
+      "فشل إرسال الرسالة عبر مزود واتساب" + (detail ? ` — ${detail}` : "")
+    );
+  }
 }
 
 // تخمين نوع MIME من امتداد الرابط عند غياب Content-Type
@@ -532,7 +538,12 @@ async function sendWorkflowMedia(
   let sent: boolean;
   if (creds.provider === "meta") {
     const mediaId = await uploadWhatsAppMedia({ buffer, mime, filename }, creds);
-    if (!mediaId) throw new Error("فشل رفع الوسائط إلى ميتا");
+    if (!mediaId) {
+      const detail = getLastWhatsAppError();
+      throw new Error(
+        "فشل رفع الوسائط إلى ميتا" + (detail ? ` — ${detail}` : "")
+      );
+    }
     sent = await sendWhatsAppMedia(
       ctx.waPhone,
       { mediaId, mediaType, mime, filename, caption },
@@ -545,7 +556,12 @@ async function sendWorkflowMedia(
       creds
     );
   }
-  if (!sent) throw new Error("فشل إرسال الوسائط عبر المزود");
+  if (!sent) {
+    const detail = getLastWhatsAppError();
+    throw new Error(
+      "فشل إرسال الوسائط عبر المزود" + (detail ? ` — ${detail}` : "")
+    );
+  }
 
   if (ctx.conversationId) {
     await prisma.message.create({
@@ -774,7 +790,12 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
         personalize(step.prompt ?? "يرجى مشاركة موقعك لإتمام الطلب", ctx),
         creds
       );
-      if (!sent) throw new Error("فشل إرسال طلب الموقع");
+      if (!sent) {
+        const detail = getLastWhatsAppError();
+        throw new Error(
+          "فشل إرسال طلب الموقع" + (detail ? ` — ${detail}` : "")
+        );
+      }
       if (ctx.conversationId) {
         await prisma.message.create({
           data: {

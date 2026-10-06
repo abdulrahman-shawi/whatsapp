@@ -125,6 +125,10 @@ export async function runKnowledgeQuery(
         user: source.dbUser ?? undefined,
         password: source.dbPassword ?? undefined,
         database: source.dbName ?? undefined,
+        // خوادم Neon (والخدمات السحابية المشابهة) تشترط SSL
+        ...(source.dbHost.endsWith(".neon.tech")
+          ? { ssl: { rejectUnauthorized: false } }
+          : {}),
         connectionTimeoutMillis: QUERY_TIMEOUT_MS,
         statement_timeout: QUERY_TIMEOUT_MS,
       });

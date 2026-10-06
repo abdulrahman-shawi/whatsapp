@@ -131,7 +131,7 @@ export async function uploadWhatsAppMedia(
   }
 }
 
-// إرسال رسالة وسائط بمعرّف ميتا (image/document/audio/video) — مزود ميتا فقط
+// إرسال رسالة وسائط (image/document/audio/video) — عبر ميتا أو UltraMsg
 export async function sendWhatsAppMedia(
   to: string,
   media: {
@@ -140,10 +140,28 @@ export async function sendWhatsAppMedia(
     mime: string;
     filename?: string;
     caption?: string;
+    // ملف UltraMsg الخام (base64) — لا يحتاج mediaId مرفوعاً مسبقاً
+    buffer?: Buffer;
   },
   creds: WhatsAppCreds | null
 ): Promise<boolean> {
-  if (!creds || creds.provider !== "meta") return false;
+  if (!creds) return false;
+  return creds.provider === "meta"
+    ? sendMediaViaMeta(to, media, creds)
+    : sendMediaViaUltraMsg(to, media, creds);
+}
+
+async function sendMediaViaMeta(
+  to: string,
+  media: {
+    mediaId: string;
+    mediaType: "image" | "document" | "audio" | "video";
+    mime: string;
+    filename?: string;
+    caption?: string;
+  },
+  creds: { token: string; phoneNumberId: string }
+): Promise<boolean> {
   try {
     // مستند بلا تسمية توضيحية يحتاج اسماً للعرض في واتساب
     const payload =
@@ -176,6 +194,48 @@ export async function sendWhatsAppMedia(
       }
     );
     return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// UltraMsg يقبل الوسائط كرابط أو base64 — نرسل الملف مباشرة دون رفع مسبق
+async function sendMediaViaUltraMsg(
+  to: string,
+  media: {
+    mediaType: "image" | "document" | "audio" | "video";
+    mime: string;
+    filename?: string;
+    caption?: string;
+    buffer?: Buffer;
+  },
+  creds: { instanceId: string; token: string }
+): Promise<boolean> {
+  if (!media.buffer) return false;
+  try {
+    const dataUri = `data:${media.mime};base64,${media.buffer.toString("base64")}`;
+    const params = new URLSearchParams({
+      token: creds.token,
+      to,
+      body: dataUri,
+    });
+    if (media.caption) params.set("caption", media.caption);
+    if (media.mediaType === "document") {
+      params.set("filename", media.filename ?? "ملف");
+    }
+    const res = await fetch(
+      `https://api.ultramsg.com/${creds.instanceId}/messages/${media.mediaType}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      }
+    );
+    if (!res.ok) return false;
+    const data = (await res.json().catch(() => null)) as {
+      sent?: string | boolean;
+    } | null;
+    return data?.sent === true || data?.sent === "true";
   } catch {
     return false;
   }

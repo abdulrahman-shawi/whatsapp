@@ -259,9 +259,15 @@ export function InboxClient({
     });
     if (res.ok) {
       const data = await res.json();
+      if (data.waSent === false) {
+        alert("حُفظت الرسالة لكن فشل إرسالها إلى واتساب — تحقق من إعدادات UltraMsg/ميتا");
+      }
       setMessages((prev) => [...prev, data.message]);
       lastTsRef.current = data.message.createdAt;
       refreshList();
+    } else {
+      const err = await res.json().catch(() => null);
+      alert(err?.error ?? "فشل إرسال الملف");
     }
   }
 

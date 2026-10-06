@@ -13,7 +13,7 @@ type Params = { params: { id: string } };
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024; // حد ميتا المعتاد: 16MB
 
-// إرسال رسالة وسائط (صورة/مستند/صوت/فيديو) من المحادثة — مزود ميتا فقط
+// إرسال رسالة وسائط (صورة/مستند/صوت/فيديو) من المحادثة — ميتا وUltraMsg
 // يستقبل FormData: file (الملف) + caption (تسمية توضيحية اختيارية)
 export async function POST(req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
@@ -45,22 +45,31 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   const creds = await resolveWhatsAppCreds(ctx.workspaceId);
-  if (!creds || creds.provider !== "meta") {
+  if (!creds) {
     return NextResponse.json(
-      { error: "إرسال الوسائط مدعوم لمزود ميتا فقط حالياً" },
+      { error: "مزود واتساب غير مضبوط في الإعدادات" },
       { status: 400 }
     );
   }
 
-  // رفع الملف لخوادم ميتا أولاً للحصول على معرّف وسائط
   const buffer = Buffer.from(await file.arrayBuffer());
   const mediaType = mediaTypeForMime(file.type || "application/octet-stream");
-  const mediaId = await uploadWhatsAppMedia(
-    { buffer, mime: file.type || "application/octet-stream", filename: file.name },
-    creds
-  );
-  if (!mediaId) {
-    return NextResponse.json({ error: "فشل رفع الملف إلى ميتا" }, { status: 502 });
+
+  // ميتا: نرفع الملف لخوادمها أولاً للحصول على معرّف وسائط
+  // UltraMsg: يرسل الملف مباشرة كـ base64 — لا حاجة لرفع مسبق
+  let mediaId: string | null = null;
+  if (creds.provider === "meta") {
+    mediaId = await uploadWhatsAppMedia(
+      {
+        buffer,
+        mime: file.type || "application/octet-stream",
+        filename: file.name,
+      },
+      creds
+    );
+    if (!mediaId) {
+      return NextResponse.json({ error: "فشل رفع الملف إلى ميتا" }, { status: 502 });
+    }
   }
 
   // تخزين الرسالة قبل الإرسال الخارجي — نفس منطق الرسائل النصية
@@ -91,11 +100,13 @@ export async function POST(req: Request, { params }: Params) {
   const waSent = await sendWhatsAppMedia(
     conversation.contact.waPhone,
     {
-      mediaId,
+      mediaId: mediaId ?? "",
       mediaType,
       mime: file.type || "application/octet-stream",
       filename: file.name,
       caption: caption || undefined,
+      // UltraMsg فقط: الملف الخام لترميزه base64 عند الإرسال
+      buffer: creds.provider === "ultramsg" ? buffer : undefined,
     },
     creds
   );

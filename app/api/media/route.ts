@@ -24,6 +24,35 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "الوسائط غير موجودة" }, { status: 404 });
   }
 
+  // الوسائط المخزنة محلياً في المخزن (وارد UltraMsg base64 أو ملفات مرفوعة)
+  // التخويل: معرّف الوسائط يجب أن يخص رسالة من محادثة في مساحة عمل المستخدم
+  if (mediaId.startsWith("asset:")) {
+    const assetDbId = mediaId.slice("asset:".length);
+    const [message, asset] = await Promise.all([
+      prisma.message.findFirst({
+        where: { mediaId, conversation: { workspaceId: ctx.workspaceId } },
+        select: { id: true },
+      }),
+      prisma.mediaAsset.findFirst({
+        where: { id: assetDbId, workspaceId: ctx.workspaceId },
+      }),
+    ]);
+    if (!message || !asset) {
+      return NextResponse.json({ error: "الوسائط غير موجودة" }, { status: 404 });
+    }
+    const bytes = Buffer.from(asset.dataBase64, "base64");
+    return new Response(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      {
+        headers: {
+          "Content-Type": asset.mime,
+          "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
+          "Cache-Control": "private, max-age=3600",
+        },
+      }
+    );
+  }
+
   const token = await getIntegration(ctx.workspaceId, "WHATSAPP_TOKEN");
   if (!token) {
     return NextResponse.json({ error: "توكن واتساب غير مضبوط" }, { status: 500 });

@@ -14,8 +14,8 @@ import type {
   MessageItem,
 } from "./types";
 
-// نمط عرض القائمة: الوارد المفتوح / المؤرشفة / المغلقة
-export type ListView = "open" | "archived" | "closed";
+// نمط عرض القائمة: الوارد المفتوح / المتابعات / المؤرشفة / المغلقة
+export type ListView = "open" | "followups" | "archived" | "closed";
 
 type Props = {
   initialConversations: ConversationListItem[];
@@ -36,6 +36,12 @@ export function InboxClient({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // البحث الشامل: نتائج /api/search — null تعني "لا بحث نشط"
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ConversationListItem[] | null>(
+    null
+  );
+  const [searching, setSearching] = useState(false);
 
   // مرجع لآخر توقيت رسالة لاستطلاع الرسائل الجديدة فقط
   const lastTsRef = useRef<string | null>(null);
@@ -48,15 +54,14 @@ export function InboxClient({
   const filterRef = useRef(filter);
   filterRef.current = filter;
 
-  const selected = conversations.find((c) => c.id === selectedId) ?? null;
-
   // تحديث قائمة المحادثات من الخادم حسب نمط العرض والفلتر الحاليين
   const refreshList = useCallback(async () => {
     try {
       const archived = viewRef.current === "archived";
       const closed = viewRef.current === "closed";
+      const followups = viewRef.current === "followups";
       const res = await fetch(
-        `/api/conversations?archived=${archived}&closed=${closed}&filter=${filterRef.current}`
+        `/api/conversations?archived=${archived}&closed=${closed}&followups=${followups}&filter=${filterRef.current}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -66,6 +71,39 @@ export function InboxClient({
       // تجاهل أخطاء الشبكة في الاستطلاع الدوري
     }
   }, []);
+
+  // البحث الشامل مع مهلة قصيرة تجمّع الحروف أثناء الكتابة
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.conversations);
+        }
+      } catch {
+        // تجاهل أخطاء الشبكة
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // القائمة المعروضة: نتائج البحث عند نشاطه، وإلا قائمة الوارد
+  const visibleConversations = searchResults ?? conversations;
+
+  const selected =
+    visibleConversations.find((c) => c.id === selectedId) ??
+    conversations.find((c) => c.id === selectedId) ??
+    null;
 
   // استطلاع قائمة المحادثات كل 15 ثانية
   // (يبقى كاحتياط حتى مع Pusher، وهو الطريقة الوحيدة عند غياب إعداداته)
@@ -315,7 +353,7 @@ export function InboxClient({
       {/* قائمة المحادثات — تظهر يميناً في RTL */}
       <div className="w-80 shrink-0 border-e">
         <ConversationList
-          conversations={conversations}
+          conversations={visibleConversations}
           selectedId={selectedId}
           onSelect={setSelectedId}
           view={view}
@@ -326,6 +364,9 @@ export function InboxClient({
           }}
           filter={filter}
           onFilterChange={setFilter}
+          query={query}
+          onQueryChange={setQuery}
+          searching={searching}
         />
       </div>
 
@@ -345,6 +386,7 @@ export function InboxClient({
             onToggleArchive={handleToggleArchive}
             onAssign={handleAssign}
             onToggleClosed={handleToggleClosed}
+            onFollowUpChanged={refreshList}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">

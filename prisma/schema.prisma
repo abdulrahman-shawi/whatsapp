@@ -107,6 +107,8 @@ model Workspace {
   workflows  Workflow[]
   bookings   Booking[]
   mediaAssets MediaAsset[]
+  cannedResponses CannedResponse[]
+  scheduledMessages ScheduledMessage[]
   planId     String?
   plan       Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
 }
@@ -239,6 +241,8 @@ model Conversation {
   agent         Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
   assignees     ConversationAssignee[] // الموظفون المسند إليهم المحادثة (متعدد)
   messages      Message[]
+  scheduledMessages ScheduledMessage[]
+  followUpAt    DateTime? // موعد متابعة المحادثة — يظهر في قائمة "متابعات" بالوارد
 }
 
 // إسناد محادثة لموظف — نفس المحادثة قد تُسند لأكثر من شخص
@@ -250,6 +254,32 @@ model ConversationAssignee {
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([conversationId, userId])
+}
+
+// رد جاهز: اختصار تكتبه في خانة الإرسال يتحول لنص كامل — يختصر وقت الموظف
+model CannedResponse {
+  id          String    @id @default(cuid())
+  workspaceId String
+  shortcut    String // مثال: "س1" — يُطابق مع أول الكلام في خانة الإرسال
+  body        String    @db.Text
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, shortcut])
+}
+
+// رسالة مجدولة: تُرسل تلقائياً في موعدها من الكرون — وصولها خارج نافذة ٢٤ ساعة غير مضمون
+model ScheduledMessage {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  conversationId String
+  body           String        @db.Text
+  sendAt         DateTime
+  sentAt         DateTime? // وجود قيمة تعني أنها أُرسلت
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // الرسالة داخل محادثة

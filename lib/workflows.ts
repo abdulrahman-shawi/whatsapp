@@ -11,6 +11,7 @@ import {
   getLastWhatsAppError,
 } from "@/lib/whatsapp";
 import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { saveMediaAsset } from "@/lib/assets";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { runKnowledgeQuery } from "@/lib/db-knowledge";
 import { getIntegration } from "@/lib/settings";
@@ -564,12 +565,26 @@ async function sendWorkflowMedia(
   }
 
   if (ctx.conversationId) {
+    // تخزين نسخة محلية للعرض في الوارد — لازم لمزود UltraMsg الذي لا يعيد معرّفاً
+    let displayMediaId: string | null = null;
+    try {
+      const asset = await saveMediaAsset({
+        workspaceId: ctx.workspaceId,
+        buffer,
+        mime,
+        filename,
+      });
+      displayMediaId = `asset:${asset.id}`;
+    } catch {
+      // فشل التخزين لا يعطّل الإرسال — نكتفي بعدم عرض المعاينة
+    }
     await prisma.message.create({
       data: {
         conversationId: ctx.conversationId,
         direction: "OUTBOUND",
         senderType: "HUMAN",
         body: caption ?? "[وسائط]",
+        mediaId: displayMediaId,
         mediaMime: mime,
         mediaType,
       },

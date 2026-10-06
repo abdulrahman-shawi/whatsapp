@@ -28,6 +28,8 @@ export type ConversationListItem = {
   // الموظفون المسند إليهم المحادثة (قد يكون أكثر من واحد)
   assignees: MemberInfo[];
   closedAt: string | null;
+  // موعد المتابعة القادم لهذه المحادثة (إن وُجد)
+  followUpAt: string | null;
   lastMessageAt: string;
   contact: ContactInfo;
   lastMessage: {
@@ -58,4 +60,18 @@ export type TemplateInfo = {
   name: string;
   language: string;
   body: string;
+};
+
+// رد جاهز: اختصار يردّ به الموظف فيُستبدل بالنص الكامل
+export type CannedResponse = {
+  id: string;
+  shortcut: string;
+  body: string;
+};
+
+// رسالة مجدولة بانتظار الإرسال في محادثة
+export type ScheduledMessage = {
+  id: string;
+  body: string;
+  sendAt: string;
 };

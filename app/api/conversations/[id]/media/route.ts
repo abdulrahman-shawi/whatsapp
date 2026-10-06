@@ -9,6 +9,7 @@ import {
   getLastWhatsAppError,
 } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { saveMediaAsset } from "@/lib/assets";
 
 type Params = { params: { id: string } };
 
@@ -57,7 +58,7 @@ export async function POST(req: Request, { params }: Params) {
   const mediaType = mediaTypeForMime(file.type || "application/octet-stream");
 
   // ميتا: نرفع الملف لخوادمها أولاً للحصول على معرّف وسائط
-  // UltraMsg: يرسل الملف مباشرة كـ base64 — لا حاجة لرفع مسبق
+  // UltraMsg: يرسل الملف مباشرة كـ base64 — نخزنه محلياً كأصل لعرضه في الوارد
   let mediaId: string | null = null;
   if (creds.provider === "meta") {
     mediaId = await uploadWhatsAppMedia(
@@ -75,6 +76,14 @@ export async function POST(req: Request, { params }: Params) {
         { status: 502 }
       );
     }
+  } else {
+    const asset = await saveMediaAsset({
+      workspaceId: ctx.workspaceId,
+      buffer,
+      mime: file.type || "application/octet-stream",
+      filename: file.name || "ملف",
+    });
+    mediaId = `asset:${asset.id}`;
   }
 
   // تخزين الرسالة قبل الإرسال الخارجي — نفس منطق الرسائل النصية

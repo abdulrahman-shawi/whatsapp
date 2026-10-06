@@ -1,5 +1,7 @@
 import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
 import { resolveWorkspaceByUltraMsgInstance } from "@/lib/settings";
+import { decodeDataUri, saveMediaAsset } from "@/lib/assets";
+import { prisma } from "@/lib/prisma";
 
 // ننتظر المعالجة كاملة (تأخير الرد + OpenAI) — نحتاج مهلة أطول من الافتراضية
 export const maxDuration = 60;
@@ -10,6 +12,8 @@ interface UltraMsgData {
   fromMe?: boolean | string;
   type?: string;
   body?: string;
+  media?: string; // رابط الوسائط في بعض إعدادات الويب هوك
+  caption?: string; // التسمية التوضيحية للوسائط إن وُجدت
   pushname?: string;
   name?: string;
 }
@@ -70,14 +74,54 @@ export async function POST(req: Request) {
   }
 
   const mediaType = data.type ? ULTRAMSG_MEDIA_TYPES[data.type] : undefined;
-  // في UltraMsg تصل الوسائط كرابط مباشر في body (على عكس ميتا التي تعطي معرّفاً)
-  const mediaUrl =
-    mediaType && data.body?.startsWith("http") ? data.body : undefined;
+  // في UltraMsg تصل الوسائط إما كرابط مباشر في body أو base64
+  // (حسب إعداد "Webhook data type" في لوحة النسخة) — ندعم الحالتين
+  let mediaUrl: string | undefined;
+  let mediaAssetId: string | undefined;
+  let mediaMime: string | null = null;
+  // رابط الوسائط قد يصل في حقل media أو في body مباشرة
+  const bodyOrMedia = data.body ?? data.media ?? "";
+  if (mediaType && bodyOrMedia) {
+    if (bodyOrMedia.startsWith("http")) {
+      mediaUrl = bodyOrMedia;
+    } else {
+      // body قد يكون data URI أو base64 خاماً
+      const decoded =
+        decodeDataUri(bodyOrMedia) ??
+        (() => {
+          try {
+            return { buffer: Buffer.from(bodyOrMedia, "base64"), mime: "application/octet-stream" };
+          } catch {
+            return null;
+          }
+        })();
+      // نتجاهل base64 غير صالح أو الملفات الضخمة — قيود حجم طلب/قاعدة البيانات
+      if (decoded && decoded.buffer.length > 0 && decoded.buffer.length <= 4 * 1024 * 1024) {
+        const workspaceForAsset =
+          workspaceId ??
+          (await prisma.workspace.findFirst({ select: { id: true } }))?.id;
+        if (workspaceForAsset) {
+          const asset = await saveMediaAsset({
+            workspaceId: workspaceForAsset,
+            buffer: decoded.buffer,
+            mime: decoded.mime,
+            filename: `وارد-${mediaType}`,
+          });
+          mediaAssetId = asset.id;
+          mediaMime = decoded.mime;
+        }
+      } else if (decoded && decoded.buffer.length > 4 * 1024 * 1024) {
+        console.warn("[ultramsg-webhook] وسائط واردة تتجاوز 4MB — لم تُخزَّن للعرض");
+      }
+    }
+  }
 
   const text =
     data.type === "chat" || !data.type
       ? data.body ?? ""
-      : placeholderFor(data.type);
+      : data.caption?.trim()
+        ? data.caption.trim()
+        : placeholderFor(data.type);
 
   if (text || mediaUrl) {
     // ننتظر اكتمال المعالجة قبل الرد — على Vercel تُجمَّد الدالة بعد إرسال
@@ -90,7 +134,9 @@ export async function POST(req: Request) {
         workspaceId: workspaceId ?? undefined,
         media: mediaUrl
           ? { mediaId: mediaUrl, mediaMime: null, mediaType: mediaType ?? null }
-          : undefined,
+          : mediaAssetId
+            ? { mediaId: `asset:${mediaAssetId}`, mediaMime, mediaType: mediaType ?? null }
+            : undefined,
       });
     } catch (e) {
       console.error("[ultramsg-webhook] خطأ أثناء المعالجة:", e);

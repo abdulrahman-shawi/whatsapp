@@ -1,10 +1,10 @@
 "use client";
 
-import { Archive, CheckCheck, Inbox as InboxIcon, UserRound } from "lucide-react";
+import { Archive, BellRing, CalendarClock, CheckCheck, Inbox as InboxIcon, Search, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/time";
+import { relativeTime, messageTime } from "@/lib/time";
 import { StageBadge } from "./stage-badge";
 import type { ListView } from "./inbox-client";
 import type {
@@ -25,6 +25,7 @@ const statusConfig: Record<
 
 const viewTitles: Record<ListView, string> = {
   open: "المحادثات",
+  followups: "متابعات",
   archived: "المحادثات المؤرشفة",
   closed: "المحادثات المغلقة",
 };
@@ -37,6 +38,10 @@ type Props = {
   onViewChange: (view: ListView) => void;
   filter: AssignmentFilter;
   onFilterChange: (filter: AssignmentFilter) => void;
+  // البحث الشامل: نص البحث ونتائجه تديرها النافذة الأم (inbox-client)
+  query: string;
+  onQueryChange: (q: string) => void;
+  searching: boolean;
 };
 
 // قائمة المحادثات (العمود الأيمن في RTL)
@@ -48,12 +53,25 @@ export function ConversationList({
   onViewChange,
   filter,
   onFilterChange,
+  query,
+  onQueryChange,
+  searching,
 }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
         <h2 className="font-semibold">{viewTitles[view]}</h2>
         <div className="flex items-center gap-1">
+          {view !== "followups" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="محادثات لها موعد متابعة"
+              onClick={() => onViewChange("followups")}
+            >
+              <BellRing className="h-4 w-4" />
+            </Button>
+          )}
           {view !== "archived" && (
             <Button
               variant="ghost"
@@ -83,6 +101,28 @@ export function ConversationList({
         </div>
       </div>
 
+      {/* البحث الشامل: اسم العميل أو الرقم أو الوسوم أو نص الرسائل */}
+      <div className="border-b p-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute start-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="بحث في المحادثات والرسائل…"
+            className="w-full rounded-md border bg-background py-1.5 ps-8 pe-7 text-sm"
+          />
+          {query && (
+            <button
+              className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => onQueryChange("")}
+              title="مسح البحث"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* فلتر الإسناد — في الوارد المفتوح فقط */}
       {view === "open" && (
         <div className="border-b p-2">
@@ -99,9 +139,15 @@ export function ConversationList({
       )}
 
       <div className="flex-1 overflow-y-auto">
-        {conversations.length === 0 ? (
+        {query.trim().length >= 2 && conversations.length === 0 && !searching ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            لا توجد محادثات بعد
+            لا نتائج مطابقة لبحثك
+          </p>
+        ) : conversations.length === 0 ? (
+          <p className="p-6 text-center text-sm text-muted-foreground">
+            {view === "followups"
+              ? "لا توجد محادثات بموعد متابعة"
+              : "لا توجد محادثات بعد"}
           </p>
         ) : (
           conversations.map((c) => {
@@ -144,6 +190,21 @@ export function ConversationList({
                   <Badge variant={status.variant}>{status.label}</Badge>
                   {c.platform === "WIDGET" && (
                     <Badge variant="outline">من الموقع</Badge>
+                  )}
+                  {c.followUpAt && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-amber-300 text-amber-700"
+                      title={`متابعة: ${messageTime(c.followUpAt)}`}
+                    >
+                      <CalendarClock className="h-3 w-3" />
+                      {messageTime(c.followUpAt)}
+                    </Badge>
+                  )}
+                  {view === "followups" && c.followUpAt && (
+                    <span className="text-xs text-amber-700">
+                      متابعة {messageTime(c.followUpAt)}
+                    </span>
                   )}
                   {c.assignees.length > 0 && (
                     <span className="flex items-center gap-1" title={c.assignees.map((a) => a.name).join("، ")}>

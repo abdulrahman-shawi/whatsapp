@@ -4,16 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  BellRing,
   Check,
   CheckCheck,
+  Clock,
   FileText,
   Loader2,
   Paperclip,
   Send,
   Sparkles,
   StickyNote,
+  Trash2,
   User,
   X,
+  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,9 +25,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { messageTime } from "@/lib/time";
 import type {
+  CannedResponse,
   ConversationListItem,
   MemberInfo,
   MessageItem,
+  ScheduledMessage,
   TemplateInfo,
 } from "./types";
 
@@ -41,6 +47,8 @@ type Props = {
   // استبدال قائمة المسند إليهم بالكامل (مصفوفة فارغة = إلغاء الإسناد)
   onAssign: (userIds: string[]) => void;
   onToggleClosed: () => void;
+  // تحديث القائمة بعد تغيير موعد المتابعة
+  onFollowUpChanged?: () => void;
 };
 
 // مسميات عربية لأنواع الوسائط
@@ -65,6 +73,7 @@ export function ChatWindow({
   onToggleArchive,
   onAssign,
   onToggleClosed,
+  onFollowUpChanged,
 }: Props) {
   const [text, setText] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -73,6 +82,23 @@ export function ChatWindow({
   const [isNoteMode, setIsNoteMode] = useState(false);
   const [sendingMedia, setSendingMedia] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  // الردود الجاهزة: قائمة + نافذة الإدراج والإدارة
+  const [canned, setCanned] = useState<CannedResponse[]>([]);
+  const [cannedOpen, setCannedOpen] = useState(false);
+  const [newShortcut, setNewShortcut] = useState("");
+  const [newCannedBody, setNewCannedBody] = useState("");
+  // الرسائل المجدولة: نافذة الجدولة + القائمة المعلّقة
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduled, setScheduled] = useState<ScheduledMessage[]>([]);
+  const [schedBody, setSchedBody] = useState("");
+  const [schedAt, setSchedAt] = useState("");
+  const [scheduling, setScheduling] = useState(false);
+  // موعد متابعة المحادثة
+  const [followUpAt, setFollowUpAt] = useState<string | null>(
+    conversation.followUpAt
+  );
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpDraft, setFollowUpDraft] = useState("");
   // منتقي القوالب
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -83,7 +109,7 @@ export function ChatWindow({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // تنظيف الحقول عند تبديل المحادثة
+  // تنظيف الحقول عند تبديل المحادثة + تحميل الردود الجاهزة والمجدولة لها
   useEffect(() => {
     setText("");
     setPendingFile(null);
@@ -93,7 +119,28 @@ export function ChatWindow({
     setTemplateParams({});
     setTemplatePickerOpen(false);
     setAssignOpen(false);
-  }, [conversation.id]);
+    setCannedOpen(false);
+    setScheduleOpen(false);
+    setFollowUpOpen(false);
+    setFollowUpAt(conversation.followUpAt);
+    setFollowUpDraft("");
+    let cancelled = false;
+    fetch("/api/canned-responses")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setCanned(data.items);
+      })
+      .catch(() => {});
+    fetch(`/api/conversations/${conversation.id}/scheduled`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setScheduled(data.items);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation.id, conversation.followUpAt]);
 
   // التمرير لأسفل عند وصول رسائل جديدة
   useEffect(() => {
@@ -179,11 +226,110 @@ export function ChatWindow({
       setSuggestion(null);
       return;
     }
-    const body = text.trim();
-    if (!body) return;
-    onSend(body, isNoteMode);
+    const typed = text.trim();
+    if (!typed) return;
+    // الردود الجاهزة: نص مكوّن من اختصار مسجّل فقط يُستبدل بالنص الكامل
+    const cannedMatch = canned.find((c) => c.shortcut === typed);
+    onSend(cannedMatch ? cannedMatch.body : typed, isNoteMode);
     setText("");
     setSuggestion(null);
+  }
+
+  // إدراج رد جاهز في خانة الإرسال
+  function handleInsertCanned(item: CannedResponse) {
+    setText(item.body);
+    setCannedOpen(false);
+  }
+
+  // حفظ رد جاهز جديد (المالك — غيره يظهر له تنبيه بالخطأ)
+  async function handleSaveCanned() {
+    const shortcut = newShortcut.trim();
+    const body = newCannedBody.trim();
+    if (!shortcut || !body) return;
+    const res = await fetch("/api/canned-responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut, body }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setCanned((prev) => {
+        const rest = prev.filter((c) => c.shortcut !== data.item.shortcut);
+        return [data.item, ...rest];
+      });
+      setNewShortcut("");
+      setNewCannedBody("");
+    } else {
+      const err = await res.json().catch(() => null);
+      alert(err?.error ?? "تعذّر حفظ الرد الجاهز");
+    }
+  }
+
+  async function handleDeleteCanned(id: string) {
+    const res = await fetch(`/api/canned-responses?id=${id}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setCanned((prev) => prev.filter((c) => c.id !== id));
+    } else {
+      const err = await res.json().catch(() => null);
+      alert(err?.error ?? "تعذّر حذف الرد الجاهز");
+    }
+  }
+
+  // جدولة رسالة لموعد لاحق — تُرسل تلقائياً من الكرون
+  async function handleSchedule() {
+    const body = schedBody.trim();
+    if (!body || !schedAt) return;
+    setScheduling(true);
+    try {
+      const res = await fetch(`/api/conversations/${conversation.id}/scheduled`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body, sendAt: new Date(schedAt).toISOString() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setScheduled((prev) =>
+          [...prev, data.item].sort((a, b) => a.sendAt.localeCompare(b.sendAt))
+        );
+        setSchedBody("");
+        setSchedAt("");
+      } else {
+        alert(data?.error ?? "تعذّرت جدولة الرسالة");
+      }
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  async function handleCancelScheduled(id: string) {
+    const res = await fetch(
+      `/api/conversations/${conversation.id}/scheduled?id=${id}`,
+      { method: "DELETE" }
+    );
+    if (res.ok) {
+      setScheduled((prev) => prev.filter((s) => s.id !== id));
+    }
+  }
+
+  // ضبط / إلغاء موعد متابعة المحادثة
+  async function handleSaveFollowUp() {
+    const value = followUpDraft ? new Date(followUpDraft).toISOString() : null;
+    if (followUpDraft && isNaN(new Date(followUpDraft).getTime())) return;
+    const res = await fetch(`/api/conversations/${conversation.id}/followup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ followUpAt: value }),
+    });
+    if (res.ok) {
+      setFollowUpAt(value);
+      setFollowUpOpen(false);
+      onFollowUpChanged?.();
+    } else {
+      const err = await res.json().catch(() => null);
+      alert(err?.error ?? "تعذّر حفظ موعد المتابعة");
+    }
   }
 
   // عرض محتوى وسائط رسالة عبر وسيط /api/media
@@ -302,6 +448,70 @@ export function ChatWindow({
                       إلغاء الإسناد
                     </button>
                   )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* متابعة المحادثة: موعد يظهر في قائمة "متابعات" */}
+          <div className="relative">
+            <Button
+              variant={followUpAt ? "secondary" : "outline"}
+              size="sm"
+              title={
+                followUpAt
+                  ? `موعد المتابعة: ${messageTime(followUpAt)}`
+                  : "ضبط موعد متابعة"
+              }
+              onClick={() => {
+                setFollowUpOpen((v) => !v);
+                setFollowUpDraft(
+                  followUpAt ? followUpAt.slice(0, 16) : ""
+                );
+              }}
+            >
+              <BellRing className="h-4 w-4" />
+              {followUpAt ? messageTime(followUpAt) : "متابعة"}
+            </Button>
+            {followUpOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setFollowUpOpen(false)}
+                />
+                <div className="absolute end-0 top-full z-20 mt-1 w-64 rounded-md border bg-background p-2 shadow-lg">
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    موعد المتابعة القادم
+                  </p>
+                  <input
+                    type="datetime-local"
+                    value={followUpDraft}
+                    onChange={(e) => setFollowUpDraft(e.target.value)}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                  />
+                  <div className="mt-2 flex items-center gap-1">
+                    <Button size="sm" onClick={handleSaveFollowUp}>
+                      حفظ
+                    </Button>
+                    {followUpAt && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setFollowUpDraft("");
+                          setFollowUpAt(null);
+                          fetch(`/api/conversations/${conversation.id}/followup`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ followUpAt: null }),
+                          }).then(() => onFollowUpChanged?.());
+                          setFollowUpOpen(false);
+                        }}
+                      >
+                        إلغاء المتابعة
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </>
             )}
@@ -562,6 +772,168 @@ export function ChatWindow({
         >
           <Paperclip className="h-4 w-4" />
         </Button>
+
+        {/* الردود الجاهزة */}
+        <div className="relative">
+          <Button
+            variant={cannedOpen ? "secondary" : "ghost"}
+            size="icon"
+            title="الردود الجاهزة — اختر للإدراج، أو اكتب الاختصار وحده وأرسل"
+            onClick={() => setCannedOpen((v) => !v)}
+          >
+            <Zap className="h-4 w-4" />
+          </Button>
+          {cannedOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setCannedOpen(false)}
+              />
+              <div className="absolute bottom-full start-0 z-20 mb-1 w-80 rounded-md border bg-background p-2 shadow-lg">
+                <p className="mb-1 px-1 text-xs text-muted-foreground">
+                  الردود الجاهزة — النقر يدرج النص في خانة الإرسال
+                </p>
+                <div className="max-h-56 overflow-y-auto">
+                  {canned.length === 0 ? (
+                    <p className="p-2 text-sm text-muted-foreground">
+                      لا ردود جاهزة بعد — أضف أول رد بالأسفل
+                    </p>
+                  ) : (
+                    canned.map((c) => (
+                      <div
+                        key={c.id}
+                        className="group flex items-start gap-1 rounded-sm p-1 hover:bg-muted"
+                      >
+                        <button
+                          onClick={() => handleInsertCanned(c)}
+                          className="min-w-0 flex-1 text-start"
+                        >
+                          <Badge variant="outline" className="me-1">
+                            {c.shortcut}
+                          </Badge>
+                          <span className="line-clamp-2 text-xs text-muted-foreground">
+                            {c.body}
+                          </span>
+                        </button>
+                        <button
+                          className="shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+                          title="حذف الرد الجاهز"
+                          onClick={() => handleDeleteCanned(c.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {/* إضافة رد جاهز جديد */}
+                <div className="mt-2 flex flex-col gap-1 border-t pt-2">
+                  <div className="flex gap-1">
+                    <Input
+                      value={newShortcut}
+                      onChange={(e) => setNewShortcut(e.target.value)}
+                      placeholder="اختصار (مثال: س1)"
+                      className="h-8 w-24 text-xs"
+                    />
+                    <Input
+                      value={newCannedBody}
+                      onChange={(e) => setNewCannedBody(e.target.value)}
+                      placeholder="نص الرد الكامل"
+                      className="h-8 flex-1 text-xs"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={handleSaveCanned}
+                    disabled={!newShortcut.trim() || !newCannedBody.trim()}
+                  >
+                    حفظ رد جاهز (للمالك)
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* الرسائل المجدولة */}
+        <div className="relative">
+          <Button
+            variant={scheduleOpen ? "secondary" : "ghost"}
+            size="icon"
+            title="جدولة رسالة لموعد لاحق"
+            onClick={() => setScheduleOpen((v) => !v)}
+          >
+            <Clock className="h-4 w-4" />
+          </Button>
+          {scheduleOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setScheduleOpen(false)}
+              />
+              <div className="absolute bottom-full start-0 z-20 mb-1 w-80 rounded-md border bg-background p-2 shadow-lg">
+                <p className="mb-1 px-1 text-xs text-muted-foreground">
+                  تُرسل تلقائياً في موعدها — حتى مع غلق الصفحة
+                </p>
+                <textarea
+                  value={schedBody}
+                  onChange={(e) => setSchedBody(e.target.value)}
+                  placeholder="نص الرسالة المجدولة…"
+                  rows={2}
+                  className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                />
+                <div className="mt-1 flex items-center gap-1">
+                  <input
+                    type="datetime-local"
+                    value={schedAt}
+                    onChange={(e) => setSchedAt(e.target.value)}
+                    className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSchedule}
+                    disabled={scheduling || !schedBody.trim() || !schedAt}
+                  >
+                    {scheduling ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "جدولة"
+                    )}
+                  </Button>
+                </div>
+                {scheduled.length > 0 && (
+                  <div className="mt-2 border-t pt-1">
+                    <p className="px-1 py-1 text-xs text-muted-foreground">
+                      بانتظار الإرسال ({scheduled.length})
+                    </p>
+                    {scheduled.map((s) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center gap-1 rounded-sm p-1 text-xs hover:bg-muted"
+                      >
+                        <span className="shrink-0 font-medium text-primary">
+                          {messageTime(s.sendAt)}
+                        </span>
+                        <span className="line-clamp-1 flex-1 text-muted-foreground">
+                          {s.body}
+                        </span>
+                        <button
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                          title="إلغاء الجدولة"
+                          onClick={() => handleCancelScheduled(s.id)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* تبديل الملاحظة الداخلية: لا تُرسل للعميل */}
         <Button

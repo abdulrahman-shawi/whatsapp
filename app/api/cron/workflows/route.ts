@@ -3,8 +3,9 @@ import {
   resumeWaitingWorkflowRuns,
   runNoReplyWorkflows,
 } from "@/lib/workflows";
+import { sendDueScheduledMessages } from "@/lib/conversations";
 
-// استئناف خطوات "انتظار" + فحص محفّز "لا رد" — كل ٥ دقائق (انظر vercel.json)
+// استئناف خطوات "انتظار" + فحص محفّز "لا رد" + إرسال الرسائل المجدولة — كل ٥ دقائق (انظر vercel.json)
 // الحماية عبر: Authorization: Bearer ${CRON_SECRET}
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -15,5 +16,6 @@ export async function GET(req: Request) {
 
   const resumed = await resumeWaitingWorkflowRuns();
   const noReplyFired = await runNoReplyWorkflows();
-  return NextResponse.json({ resumed, noReplyFired });
+  const scheduledSent = await sendDueScheduledMessages();
+  return NextResponse.json({ resumed, noReplyFired, scheduledSent });
 }

@@ -16,6 +16,7 @@ export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
   const archived = params.get("archived") === "true";
   const closed = params.get("closed") === "true";
+  const followups = params.get("followups") === "true";
   const filterParam = params.get("filter");
   const filter = FILTERS.includes(filterParam as AssignmentFilter)
     ? (filterParam as AssignmentFilter)
@@ -24,6 +25,7 @@ export async function GET(req: Request) {
   const conversations = await getWorkspaceConversations(ctx.workspaceId, {
     archived,
     closed,
+    followups,
     filter,
     userId: ctx.userId,
   });

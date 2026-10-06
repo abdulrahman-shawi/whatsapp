@@ -59,6 +59,7 @@ const STEP_TYPES: {
   { type: "SET_STAGE", label: "تحديث المرحلة", description: "نقل جهة الاتصال إلى مرحلة مختلفة", icon: Flag, color: "#a855f7" },
   { type: "ADD_TAG", label: "إضافة وسم", description: "إضافة وسم جديد لجهة الاتصال", icon: Tag, color: "#14b8a6" },
   { type: "AI_REPLY", label: "رد ذكي", description: "يرد الوكيل بمعرفته المربوطة (ملفات + نصوص + قواعد بيانات)", icon: Bot, color: "#8b5cf6" },
+  { type: "STOP_AI", label: "إيقاف الرد الآلي", description: "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها", icon: UserCheck, color: "#e11d48" },
   { type: "CLOSE", label: "إغلاق المحادثة", description: "إغلاق المحادثة وإخفاءها من الوارد", icon: CheckCheck, color: "#64748b" },
   { type: "WAIT", label: "تأخرت", description: "تأخر بناءً على ما إذا كان الوقت الحالي ضمن وردية العمل", icon: Clock, color: "#f97316" },
   { type: "WEBHOOK", label: "Webhook", description: "إرسال بيانات العميل إلى رابط خارجي", icon: Webhook, color: "#0ea5e9" },
@@ -298,11 +299,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
             dir="ltr"
           />
         )}
-        {(step.type === "AI_REPLY" || step.type === "CLOSE") && (
+        {(step.type === "AI_REPLY" || step.type === "CLOSE" || step.type === "STOP_AI") && (
           <p className="text-xs text-muted-foreground">
             {step.type === "AI_REPLY"
               ? "يرد الوكيل بمعرفته المربوطة (ملفات + نصوص + قواعد بيانات)"
-              : "تُغلق المحادثة وتختفي من الوارد"}
+              : step.type === "STOP_AI"
+                ? "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها"
+                : "تُغلق المحادثة وتختفي من الوارد"}
           </p>
         )}
       </div>

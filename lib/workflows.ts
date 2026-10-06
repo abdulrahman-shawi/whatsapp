@@ -16,6 +16,7 @@ export type WorkflowStep =
   | { type: "SET_STAGE"; stage: string }
   | { type: "ADD_TAG"; tag: string }
   | { type: "AI_REPLY" }
+  | { type: "STOP_AI" } // إيقاف الرد الآلي للمحادثة — تحكم بشري كامل
   | { type: "CLOSE" }
   | { type: "WAIT"; minutes: number }
   | { type: "WEBHOOK"; url: string };
@@ -43,6 +44,7 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "SET_STAGE", label: "تغيير حالة العميل" },
   { type: "ADD_TAG", label: "إضافة وسم" },
   { type: "AI_REPLY", label: "رد بالذكاء الاصطناعي" },
+  { type: "STOP_AI", label: "إيقاف الرد الآلي" },
   { type: "CLOSE", label: "إغلاق المحادثة" },
   { type: "WAIT", label: "انتظار (تأخير)" },
   { type: "WEBHOOK", label: "Webhook خارجي" },
@@ -253,6 +255,15 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       });
       return "أُغلقت المحادثة";
     }
+    case "STOP_AI": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة");
+      // تحويل للتحكم اليدوي — لا يردّ الوكيل الآلي على رسائل هذه المحادثة بعدها
+      await prisma.conversation.update({
+        where: { id: ctx.conversationId },
+        data: { status: "MANUAL" },
+      });
+      return "أُوقف الرد الآلي (تحكم بشري)";
+    }
     case "WEBHOOK": {
       const res = await fetch(step.url, {
         method: "POST",
@@ -378,10 +389,12 @@ export async function triggerWorkflows(
   });
   for (const workflow of workflows) {
     if (!workflowMatches(workflow, trigger, config, ctx)) continue;
-    // التشغيل أفضل-جهد — خطأ سير واحد لا يعطّل بقية الرسائل
-    executeWorkflow(workflow, ctx).catch((e) =>
-      console.error(`[workflows] فشل تشغيل "${workflow.name}":`, e)
-    );
+    // التشغيل متسلسل ومنتظر — خطوة "إيقاف الرد الآلي" يجب أن تسبق قرار الوكيل
+    try {
+      await executeWorkflow(workflow, ctx);
+    } catch (e) {
+      console.error(`[workflows] فشل تشغيل "${workflow.name}":`, e);
+    }
   }
 }
 

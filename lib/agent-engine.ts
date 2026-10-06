@@ -125,6 +125,7 @@ async function runPipeline(
   await incrementUsage(workspaceId);
 
   // ٥.ب مطابقة سير العمل: كلمات مفتاحية / أرقام محددة / عميل جديد
+  // ننتظر اكتمالها — قد تغيّر حالة المحادثة (إيقاف الرد الآلي/إغلاق/إسناد)
   const workflowCtx = {
     workspaceId,
     contactId: contact.id,
@@ -133,10 +134,10 @@ async function runPipeline(
     text,
     conversationId: conversation.id,
   };
-  triggerWorkflows(workspaceId, "KEYWORD", {}, workflowCtx).catch(() => {});
-  triggerWorkflows(workspaceId, "FROM_NUMBERS", {}, workflowCtx).catch(() => {});
+  await triggerWorkflows(workspaceId, "KEYWORD", {}, workflowCtx).catch(() => {});
+  await triggerWorkflows(workspaceId, "FROM_NUMBERS", {}, workflowCtx).catch(() => {});
   if (isNewContact) {
-    triggerWorkflows(workspaceId, "NEW_CONTACT", {}, workflowCtx).catch(() => {});
+    await triggerWorkflows(workspaceId, "NEW_CONTACT", {}, workflowCtx).catch(() => {});
   }
 
   // ٦. كلمات التسليم: تحويل المحادثة لموظف دون رد آلي
@@ -157,8 +158,15 @@ async function runPipeline(
   }
 
   // ٧. تحكم بشري (يدوي أو مسلّم) — نتوقف دون رد
-  if (conversation.status !== "AI") {
-    return { conversationId: conversation.id, reply: null, status: conversation.status };
+  // نقرأ الحالة حديثة من القاعدة: سير العمل قد يكون حوّلها للتحكم اليدوي للتو
+  const freshStatus = (
+    await prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      select: { status: true },
+    })
+  )?.status ?? conversation.status;
+  if (freshStatus !== "AI") {
+    return { conversationId: conversation.id, reply: null, status: freshStatus };
   }
 
   // ٧.ب حد الباقة: استنفاد رصيد الرسائل أو توكنات الذكاء الاصطناعي يوقف الرد

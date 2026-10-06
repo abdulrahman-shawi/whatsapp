@@ -6,12 +6,14 @@ function currentMonth(): string {
 }
 
 // تعريف الباقات الثلاث — الأسعار للعرض في المرحلة اليدوية
+// حدود التوكنات سخية مقارنة بالتكلفة الفعلية لـ OpenAI (gpt-4o-mini ≈ $0.15/مليون توكن دخل)
 export const PLAN_DEFINITIONS = [
   {
     code: "STARTER",
     name: "أساسية",
     priceMonthly: 0,
     messageLimit: 1000,
+    tokenLimit: 500_000,
     maxMembers: 2,
     maxAgents: 1,
     sortOrder: 1,
@@ -21,6 +23,7 @@ export const PLAN_DEFINITIONS = [
     name: "احترافية",
     priceMonthly: 19,
     messageLimit: 5000,
+    tokenLimit: 3_000_000,
     maxMembers: 5,
     maxAgents: 3,
     sortOrder: 2,
@@ -30,6 +33,7 @@ export const PLAN_DEFINITIONS = [
     name: "أعمال",
     priceMonthly: 49,
     messageLimit: 20000,
+    tokenLimit: 15_000_000,
     maxMembers: 15,
     maxAgents: 10,
     sortOrder: 3,
@@ -44,6 +48,7 @@ export type WorkspacePlan = {
   name: string;
   priceMonthly: number;
   messageLimit: number;
+  tokenLimit: number;
   maxMembers: number;
   maxAgents: number;
 };
@@ -57,6 +62,7 @@ export async function ensurePlansSeeded(): Promise<void> {
         name: def.name,
         priceMonthly: def.priceMonthly,
         messageLimit: def.messageLimit,
+        tokenLimit: def.tokenLimit,
         maxMembers: def.maxMembers,
         maxAgents: def.maxAgents,
         sortOrder: def.sortOrder,
@@ -89,6 +95,13 @@ export type UsageStatus = {
   limit: number;
   remaining: number;
   percent: number;
+  // استهلاك التوكنات الفعلي للذكاء الاصطناعي (OpenAI)
+  tokens: {
+    used: number;
+    limit: number;
+    remaining: number;
+    percent: number;
+  };
 };
 
 // حالة الاستهلاك الشهري: المستهلكة من UsageRecord والحد من الباقة
@@ -103,10 +116,18 @@ export async function getUsageStatus(workspaceId: string): Promise<UsageStatus> 
   ]);
   const used = record?.messagesUsed ?? 0;
   const limit = plan.messageLimit;
+  const tokensUsed = record?.tokensUsed ?? 0;
+  const tokenLimit = plan.tokenLimit;
   return {
     used,
     limit,
     remaining: Math.max(limit - used, 0),
     percent: Math.min(Math.round((used / limit) * 100), 100),
+    tokens: {
+      used: tokensUsed,
+      limit: tokenLimit,
+      remaining: Math.max(tokenLimit - tokensUsed, 0),
+      percent: Math.min(Math.round((tokensUsed / tokenLimit) * 100), 100),
+    },
   };
 }

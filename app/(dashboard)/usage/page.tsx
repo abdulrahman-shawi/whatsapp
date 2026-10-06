@@ -72,9 +72,15 @@ export default async function UsagePage() {
           تواصل معنا لترقية باقتك.
         </div>
       )}
+      {usageStatus.tokens.percent >= 80 && (
+        <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          اقترب استهلاك الذكاء الاصطناعي من حده — {usageStatus.tokens.percent}٪ من التوكنات الشهرية.
+        </div>
+      )}
 
       {/* بطاقات الرصيد */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>الرسائل المستهلكة هذا الشهر</CardDescription>
@@ -87,6 +93,25 @@ export default async function UsagePage() {
               <div
                 className={`h-full rounded-full transition-all ${barColor}`}
                 style={{ width: `${percent}%` }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>توكنات الذكاء الاصطناعي (OpenAI)</CardDescription>
+            <CardTitle className="text-3xl">
+              {usageStatus.tokens.used.toLocaleString("en")}{" "}
+              <span className="text-base font-normal text-muted-foreground">
+                / {usageStatus.tokens.limit.toLocaleString("en")}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full transition-all bg-violet-400"
+                style={{ width: `${usageStatus.tokens.percent}%` }}
               />
             </div>
           </CardContent>
@@ -133,8 +158,9 @@ export default async function UsagePage() {
               <thead>
                 <tr className="border-b text-muted-foreground">
                   <th className="pb-2 text-start font-medium">الشهر</th>
-                  <th className="pb-2 text-start font-medium">المستهلكة</th>
-                  <th className="pb-2 text-start font-medium">الحد</th>
+                  <th className="pb-2 text-start font-medium">الرسائل</th>
+                  <th className="pb-2 text-start font-medium">حد الرسائل</th>
+                  <th className="pb-2 text-start font-medium">توكنات AI</th>
                   <th className="pb-2 text-start font-medium">النسبة</th>
                 </tr>
               </thead>
@@ -144,6 +170,7 @@ export default async function UsagePage() {
                     <td className="py-2" dir="ltr">{r.month}</td>
                     <td className="py-2">{r.messagesUsed}</td>
                     <td className="py-2">{r.messageLimit}</td>
+                    <td className="py-2">{r.tokensUsed.toLocaleString("en")}</td>
                     <td className="py-2">
                       {Math.round((r.messagesUsed / r.messageLimit) * 100)}٪
                     </td>

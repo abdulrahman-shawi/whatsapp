@@ -13,6 +13,7 @@ type PlanItem = {
   name: string;
   priceMonthly: number;
   messageLimit: number;
+  tokenLimit: number;
   maxMembers: number;
   maxAgents: number;
 };
@@ -127,6 +128,9 @@ export function BillingClient({
               </p>
               <ul className="mt-3 flex-1 space-y-1.5 text-sm text-muted-foreground">
                 <li>{p.messageLimit.toLocaleString("en")} رسالة شهرياً</li>
+                <li>
+                  {p.tokenLimit.toLocaleString("en")} توكن ذكاء اصطناعي شهرياً
+                </li>
                 <li>حتى {p.maxMembers} أعضاء في الفريق</li>
                 <li>حتى {p.maxAgents} وكلاء ذكيين</li>
                 <li>ردود الفريق اليدوية غير محدودة</li>

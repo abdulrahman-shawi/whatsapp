@@ -13,13 +13,17 @@ function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-// زيادة عدّاد الرسائل الشهري لمساحة العمل
-async function incrementUsage(workspaceId: string) {
+// زيادة عدّاد الرسائل والتوكنات الشهري لمساحة العمل
+// tokens: استهلاك OpenAI الفعلي للرد الآلي (0 للرسائل التي لا تمر على الذكاء الاصطناعي)
+async function incrementUsage(workspaceId: string, tokens = 0) {
   const month = currentMonth();
   await prisma.usageRecord.upsert({
     where: { workspaceId_month: { workspaceId, month } },
-    update: { messagesUsed: { increment: 1 } },
-    create: { workspaceId, month, messagesUsed: 1 },
+    update: {
+      messagesUsed: { increment: 1 },
+      ...(tokens > 0 ? { tokensUsed: { increment: tokens } } : {}),
+    },
+    create: { workspaceId, month, messagesUsed: 1, tokensUsed: tokens },
   });
 }
 
@@ -134,16 +138,20 @@ async function runPipeline(
     return { conversationId: conversation.id, reply: null, status: conversation.status };
   }
 
-  // ٧.ب حد الباقة: استنفاد الرصيد الشهري يوقف الرد الآلي ويسلّم المحادثة للفريق
-  // (الرسائل اليدوية البشرية غير محدودة ولا تُحتسب)
+  // ٧.ب حد الباقة: استنفاد رصيد الرسائل أو توكنات الذكاء الاصطناعي يوقف الرد
+  // الآلي ويسلّم المحادثة للفريق (الرسائل اليدوية البشرية غير محدودة)
   const usage = await getUsageStatus(workspaceId);
-  if (usage.remaining <= 0) {
+  if (usage.remaining <= 0 || usage.tokens.remaining <= 0) {
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: { status: "HANDED_OFF" },
     });
+    const exhausted =
+      usage.remaining <= 0
+        ? `الرسائل (${usage.used}/${usage.limit})`
+        : `توكنات الذكاء الاصطناعي (${usage.tokens.used}/${usage.tokens.limit})`;
     console.warn(
-      `[agent-engine] استنفاد رصيد الباقة للمساحة ${workspaceId} (${usage.used}/${usage.limit}) — أُوقف الرد الآلي وسُلّمت المحادثة`
+      `[agent-engine] استنفاد رصيد الباقة للمساحة ${workspaceId} — ${exhausted} — أُوقف الرد الآلي وسُلّمت المحادثة`
     );
     return { conversationId: conversation.id, reply: null, status: "HANDED_OFF" };
   }
@@ -155,6 +163,7 @@ async function runPipeline(
   }
 
   let reply: string | null;
+  let tokensUsed = 0; // توكنات OpenAI الفعلية لهذا الرد — تُحتسب عند نجاح التوليد
   if (previousInbound === 0 && agent.welcomeMessage) {
     // أول رسالة من العميل في هذه المحادثة → رسالة الترحيب
     reply = agent.welcomeMessage;
@@ -174,7 +183,10 @@ async function runPipeline(
     const knowledge = retrieveRelevantKnowledge(agent.knowledgeSources, text);
     // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
     const aiConfig = await resolveAiConfig(workspaceId);
-    reply = await generateReply(history, agent.systemPrompt, knowledge, aiConfig);
+    const aiReply = await generateReply(history, agent.systemPrompt, knowledge, aiConfig);
+    reply = aiReply?.content ?? null;
+    // استهلاك التوكنات الفعلي — يُخصم من رصيد الباقة الشهري
+    if (aiReply) tokensUsed = aiReply.usage.totalTokens;
   }
 
   if (!reply) {
@@ -198,7 +210,7 @@ async function runPipeline(
     where: { id: conversation.id },
     data: { lastMessageAt: new Date() },
   });
-  await incrementUsage(workspaceId);
+  await incrementUsage(workspaceId, tokensUsed);
 
   // بث الرد الآلي لصندوق الوارد فورياً
   triggerNewMessage(workspaceId, conversation.id, replyMsg);

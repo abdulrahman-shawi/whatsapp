@@ -13,20 +13,26 @@ export async function GET(req: Request) {
   const month = new Date().toISOString().slice(0, 7); // مفتاح الشهر الحالي
   const records = await prisma.usageRecord.findMany({ where: { month } });
 
-  // مساحات العمل التي تجاوزت 80% من حدها الشهري
+  // مساحات العمل التي تجاوزت 80% من حدها الشهري (رسائل أو توكنات)
   const alerts = records
-    .filter((r) => r.messagesUsed >= r.messageLimit * 0.8)
+    .filter(
+      (r) =>
+        r.messagesUsed >= r.messageLimit * 0.8 || r.tokensUsed >= r.tokenLimit * 0.8
+    )
     .map((r) => ({
       workspaceId: r.workspaceId,
       used: r.messagesUsed,
       limit: r.messageLimit,
+      tokensUsed: r.tokensUsed,
+      tokenLimit: r.tokenLimit,
       percent: Math.round((r.messagesUsed / r.messageLimit) * 100),
+      tokensPercent: Math.round((r.tokensUsed / r.tokenLimit) * 100),
     }));
 
   for (const a of alerts) {
     // TODO: هنا يُرسل تنبيه فعلي للعميل بالبريد أو واتساب (مثلاً عبر Resend)
     console.warn(
-      `[usage-alert] مساحة العمل ${a.workspaceId} استهلكت ${a.percent}% (${a.used}/${a.limit})`
+      `[usage-alert] مساحة العمل ${a.workspaceId}: رسائل ${a.percent}% (${a.used}/${a.limit}) — توكنات ${a.tokensPercent}% (${a.tokensUsed}/${a.tokenLimit})`
     );
   }
 

@@ -31,7 +31,8 @@ export async function POST(req: Request) {
 
   // لا يوجد وكيل محفوظ بعد — نستخدم إعدادات مساحة عمل المستخدم مباشرة
   const aiConfig = await resolveAiConfig(ctx.workspaceId);
-  const reply = await generateReply(messages, body.systemPrompt, knowledge, aiConfig);
+  const aiReply = await generateReply(messages, body.systemPrompt, knowledge, aiConfig);
+  const reply = aiReply?.content ?? null;
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب
   return NextResponse.json({

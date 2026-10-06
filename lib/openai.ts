@@ -44,13 +44,25 @@ export async function resolveAiConfig(workspaceId: string): Promise<AiConfig> {
   };
 }
 
+// نتيجة توليد الرد مع استهلاك التوكنات الفعلي كما يبلّغ عنه المزوّد
+export type AiReply = {
+  content: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+};
+
+// تقدير تقريبي للتوكنات عندما لا يُبلّغ المزوّد عن الاستهلاك
+// (قاعدة إبهام: توكن واحد ≈ ٤ أحرف إنجليزية؛ العربية أقل كثافة فنستخدم ٢.٥ حرف/توكن)
+function estimateTokens(text: string): number {
+  return Math.max(Math.ceil(text.length / 2.5), 1);
+}
+
 // المفتاح والرابط والنموذج تُمرَّر من المتصل (من إعدادات مساحة العمل أو .env)
 export async function generateReply(
   messages: ChatMessage[],
   systemPrompt: string,
   knowledge: string[],
   config: AiConfig
-): Promise<string | null> {
+): Promise<AiReply | null> {
   if (!config.apiKey || !config.baseUrl || !config.model) return null;
 
   // دمج مصادر المعرفة مع التعليمات الأساسية
@@ -89,7 +101,25 @@ export async function generateReply(
 
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content;
-    return typeof content === "string" && content.trim() ? content.trim() : null;
+    if (typeof content !== "string" || !content.trim()) return null;
+
+    // الاستهلاك الفعلي من حقل usage — عند غيابه نقدّره من الطول النصي
+    const reported = data?.usage as
+      | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+      | undefined;
+    const promptEstimate =
+      system.length + messages.reduce((sum, m) => sum + m.content.length, 0);
+    const promptTokens = reported?.prompt_tokens ?? estimateTokens("x".repeat(promptEstimate));
+    const completionTokens =
+      reported?.completion_tokens ?? estimateTokens(content);
+    return {
+      content: content.trim(),
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens: reported?.total_tokens ?? promptTokens + completionTokens,
+      },
+    };
   } catch (e) {
     console.error("[ai] تعذّر الاتصال بالمزوّد:", e);
     return null;

@@ -39,7 +39,8 @@ export async function POST(
 
   // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
   const aiConfig = await resolveAiConfig(ctx.workspaceId);
-  const suggestion = await generateReply(history, systemPrompt, knowledge, aiConfig);
+  const aiReply = await generateReply(history, systemPrompt, knowledge, aiConfig);
+  const suggestion = aiReply?.content ?? null;
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب — لا نرجع 500 أبداً هنا
   return NextResponse.json({

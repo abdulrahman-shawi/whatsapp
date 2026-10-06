@@ -105,6 +105,7 @@ model Plan {
   name          String // الاسم المعروض
   priceMonthly  Int // بالدولار — للعرض فقط في المرحلة اليدوية
   messageLimit  Int // حد الرسائل الشهري
+  tokenLimit    Int         @default(1000000) // حد توكنات الذكاء الاصطناعي الشهري (استهلاك OpenAI الفعلي)
   maxMembers    Int         @default(2)
   maxAgents     Int         @default(1)
   sortOrder     Int         @default(0)
@@ -252,7 +253,9 @@ model UsageRecord {
   workspaceId  String
   month        String // بصيغة "2025-01"
   messagesUsed Int       @default(0)
+  tokensUsed   Int       @default(0) // توكنات الذكاء الاصطناعي المستهلكة هذا الشهر (OpenAI)
   messageLimit Int       @default(1000)
+  tokenLimit   Int       @default(1000000) // لقطة حد التوكنات وقت إنشاء السجل
   workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, month])

@@ -15,6 +15,7 @@ import {
   Flag,
   GitBranch,
   Globe,
+  GripVertical,
   Image,
   ListFilter,
   Loader2,
@@ -68,6 +69,16 @@ type IfCondition =
   | { kind: "LAST_OUTBOUND_HOURS"; hours: number };
 
 type IfBranchShape = { condition: IfCondition; steps: Step[] };
+
+// خط مرسوم في طبقة SVG فوق اللوحة: وصل تلقائي أو سهم GOTO
+type Wire = {
+  key: string;
+  kind: "link" | "goto";
+  d: string;
+  label?: string;
+  midX?: number;
+  midY?: number;
+};
 
 const PLATFORM_LABELS: Record<string, string> = {
   WHATSAPP: "واتساب",
@@ -144,7 +155,7 @@ const STEP_TYPES: {
   { type: "AI_CLASSIFY", label: "تصنيف بالذكاء الاصطناعي", description: "تصنيف آخر رسالة إلى أحد الخيارات", icon: ListFilter, color: "#c026d3" },
   { type: "WAIT", label: "انتظار (تأخير)", description: "تأخير قبل متابعة الخطوات التالية", icon: Clock, color: "#f97316" },
   { type: "WEBHOOK", label: "Webhook", description: "إرسال بيانات العميل إلى رابط خارجي", icon: Webhook, color: "#0ea5e9" },
-  { type: "GOTO", label: "الانتقال لخطوة", description: "القفز إلى خطوة أخرى في سير العمل (للأمام)", icon: CornerUpRight, color: "#6366f1" },
+  { type: "GOTO", label: "انتقال إلى خطوة", description: "بعد تنفيذها يقفز سير العمل فوراً إلى الخطوة التي تختارها — يظهر سهم بنفسجي يربطهما على اللوحة. للأمام فقط لمنع التكرار اللانهائي", icon: CornerUpRight, color: "#6366f1" },
   { type: "IF", label: "شرط (إذا)", description: "تفرع الخطوات حسب شرط محدد", icon: GitBranch, color: "#d946ef" },
 ];
 
@@ -450,6 +461,11 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
 
   const editingStep =
     editor && !editor.isNew ? getStepAtPath(steps, editor.path) : null;
+  // إبراز بطاقة هدف GOTO طالما محررها مفتوح
+  const editingTargetId =
+    editingStep?.type === "GOTO"
+      ? (editingStep.targetId as string | undefined)
+      : undefined;
 
   // تتبّع مسار قائمة: أزواج (فهرس خطوة، فهرس فرع) نزولاً من المستوى الأعلى.
   // فهرس الفرع b يشير إلى branches[b]، وb === branches.length يعني elseSteps
@@ -546,6 +562,16 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
 
   // سحب وإفلات: نقل خطوة لتسبق بطاقة الهدف — بين القوائم أو ضمن نفسها
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  // سحب حر يدوي بمقبض — إزاحة بصرية تراكمية فوق موضع الخطوة (pos)
+  const [freeDrag, setFreeDrag] = useState<{
+    key: string;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   function isInsideOwnBranches(srcPath: number[], targetPath: number[]): boolean {
     const src = srcPath.join(",");
@@ -642,79 +668,144 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     }
   }
 
-  // أسهم GOTO: طبقة SVG فوق البطاقات مع مراجع العناصر بالمسار
+  // خطوط الوصل والأسهم: طبقة SVG فوق البطاقات — تتبع الإحداثيات الفعلية بعد transform
   const containerRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
-  const [arrows, setArrows] = useState<{ key: string; d: string }[]>([]);
+  const [wires, setWires] = useState<Wire[]>([]);
 
-  function collectGotoPairs(): { src: string; tgt: string }[] {
-    const pairs: { src: string; tgt: string }[] = [];
+  const drawWires = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const cRect = container.getBoundingClientRect();
+    const next: Wire[] = [];
+    const px = (v: number) => Math.round(v * 10) / 10;
+
+    const point = (
+      el: HTMLElement,
+      vert: "top" | "bottom" | "mid"
+    ): [number, number] => {
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2 - cRect.left;
+      const y =
+        vert === "top"
+          ? r.top - cRect.top
+          : vert === "bottom"
+            ? r.bottom - cRect.top
+            : r.top + r.height / 2 - cRect.top;
+      return [px(x), px(y)];
+    };
+
+    const pushLink = (
+      key: string,
+      src: HTMLElement | undefined,
+      tgt: HTMLElement | undefined,
+      from: "bottom" | "mid" = "bottom",
+      to: "top" | "mid" = "top"
+    ) => {
+      if (!src || !tgt) return;
+      const [x1, y1] = point(src, from);
+      const [x2, y2] = point(tgt, to);
+      next.push({ key, kind: "link", d: `M ${x1} ${y1} L ${x2} ${y2}` });
+    };
+
+    const cardEl = (p: number[]) => cardRefs.current.get(p.join(","));
+
+    // المحفّز → أول بطاقة في السلسلة الرئيسية
+    if (steps.length > 0) {
+      pushLink("trigger-first", cardRefs.current.get("trigger"), cardRefs.current.get("0"));
+    }
+
     function walk(listPath: number[]) {
       const list = getListAtPath(steps, listPath);
+      // وصل متتالي بين البطاقات
+      for (let i = 0; i + 1 < list.length; i++) {
+        pushLink(
+          `chain-${[...listPath, i].join(",")}`,
+          cardEl([...listPath, i]),
+          cardEl([...listPath, i + 1])
+        );
+      }
       list.forEach((s, i) => {
-        if (s.type === "IF") {
-          const count = branchCountOf(s);
-          for (let b = 0; b < count; b++) walk([...listPath, i, b]);
-          if (Array.isArray(s.elseSteps)) walk([...listPath, i, count]);
-        }
-      });
-      list.forEach((s, i) => {
-        const targetId = s.targetId as string | undefined;
-        if (s.type === "GOTO" && typeof targetId === "string" && targetId) {
-          const t = list.findIndex((x) => x.id === targetId);
-          if (t >= 0) {
-            pairs.push({
-              src: [...listPath, i].join(","),
-              tgt: [...listPath, t].join(","),
-            });
-          }
+        if (s.type !== "IF") return;
+        const count = branchCountOf(s);
+        const elseOn = Array.isArray(s.elseSteps);
+        const total = count + (elseOn ? 1 : 0);
+        const ifEl = cardEl([...listPath, i]);
+        const nextEl = i + 1 < list.length ? cardEl([...listPath, i + 1]) : undefined;
+        for (let b = 0; b < total; b++) {
+          const bPath = [...listPath, i, b];
+          const hEl = cardRefs.current.get(`${bPath.join(",")}:h`);
+          // IF → ترويسة الفرع
+          pushLink(`if-${bPath.join(",")}`, ifEl, hEl, "bottom", "mid");
+          // دمج الفرع: آخر بطاقة فيه (أو ترويسته إن فارغ) → البطاقة التالية بعد IF
+          const bList = branchListOf(s, b);
+          const mergeSrc = bList.length > 0 ? cardEl([...bPath, bList.length - 1]) : hEl;
+          pushLink(`merge-${bPath.join(",")}`, mergeSrc, nextEl);
+          walk(bPath);
         }
       });
     }
     walk([]);
-    return pairs;
-  }
 
-  const drawArrows = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const cRect = container.getBoundingClientRect();
-    const next: { key: string; d: string }[] = [];
-    for (const { src, tgt } of collectGotoPairs()) {
-      const srcEl = cardRefs.current.get(src);
-      const tgtEl = cardRefs.current.get(tgt);
-      if (!srcEl || !tgtEl) continue;
-      const sr = srcEl.getBoundingClientRect();
-      const tr = tgtEl.getBoundingClientRect();
-      const x1 = sr.left + sr.width / 2 - cRect.left;
-      const y1 = sr.bottom - cRect.top;
-      const x2 = tr.left + tr.width / 2 - cRect.left;
-      const y2 = tr.top - cRect.top - 4;
-      const dy = Math.max((y2 - y1) / 2, 24);
-      next.push({
-        key: `${src}->${tgt}`,
-        d: `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`,
+    // أسهم GOTO المصمتة مع تسمية "انتقال" على منتصف المسار
+    const pairs: { src: number[]; tgt: number[] }[] = [];
+    function walkGotos(listPath: number[]) {
+      const list = getListAtPath(steps, listPath);
+      list.forEach((s, i) => {
+        if (s.type === "IF") {
+          const count = branchCountOf(s);
+          for (let b = 0; b < count; b++) walkGotos([...listPath, i, b]);
+          if (Array.isArray(s.elseSteps)) walkGotos([...listPath, i, count]);
+        }
+        const targetId = s.targetId as string | undefined;
+        if (s.type === "GOTO" && typeof targetId === "string" && targetId) {
+          const t = list.findIndex((x) => x.id === targetId);
+          if (t >= 0) pairs.push({ src: [...listPath, i], tgt: [...listPath, t] });
+        }
       });
     }
-    setArrows(next);
+    walkGotos([]);
+
+    for (const { src, tgt } of pairs) {
+      const srcEl = cardEl(src);
+      const tgtEl = cardEl(tgt);
+      if (!srcEl || !tgtEl) continue;
+      const [x1, y1] = point(srcEl, "bottom");
+      const [x2, y2] = point(tgtEl, "top");
+      const dy = Math.max((y2 - y1) / 2, 24);
+      const cx1 = x1;
+      const cy1 = y1 + dy;
+      const cx2 = x2;
+      const cy2 = y2 - dy;
+      next.push({
+        key: `goto-${src.join(",")}`,
+        kind: "goto",
+        d: `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`,
+        label: "انتقال",
+        midX: px((x1 + 3 * cx1 + 3 * cx2 + x2) / 8),
+        midY: px((y1 + 3 * cy1 + 3 * cy2 + y2) / 8) - 6,
+      });
+    }
+
+    setWires(next);
   }, [steps]);
 
   useLayoutEffect(() => {
-    drawArrows();
-  }, [drawArrows]);
+    drawWires();
+  }, [drawWires]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const onScroll = () => drawArrows();
+    const onScroll = () => drawWires();
     container.addEventListener("scroll", onScroll);
-    const ro = new ResizeObserver(() => drawArrows());
+    const ro = new ResizeObserver(() => drawWires());
     ro.observe(container);
     return () => {
       container.removeEventListener("scroll", onScroll);
       ro.disconnect();
     };
-  }, [drawArrows]);
+  }, [drawWires]);
 
   function addKeyword() {
     const k = keywordInput.trim();
@@ -1250,6 +1341,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         )}
         {step.type === "GOTO" && (
           <div className="space-y-1.5">
+            <div className="space-y-1">
+              <Label>انتقال إلى خطوة</Label>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                هذه الخطوة لا ترسل شيئاً للعميل — بل تنقل التنفيذ إلى خطوة أخرى.
+                اختر الهدف من نفس المستوى، وسترى سهماً بنفسجياً يربطهما.
+              </p>
+            </div>
             <select
               value={(step.targetId as string) ?? ""}
               onChange={(e) => update({ targetId: e.target.value || undefined })}
@@ -1469,16 +1567,24 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           const meta = stepMeta(step.type);
           const stepPath = [...listPath, i];
           const key = stepPath.join(",");
+          const pos = (step.pos as { x?: number; y?: number } | undefined) ?? {};
+          const posX = Number(pos.x) || 0;
+          const posY = Number(pos.y) || 0;
+          const isFreeDragging = freeDrag?.key === key;
           return (
             <div key={i} className="flex w-full flex-col items-center">
-              <div className="h-6 w-px bg-border" />
+              <div className="h-6 w-px" />
               <div
                 ref={(el) => {
                   if (el) cardRefs.current.set(key, el);
                   else cardRefs.current.delete(key);
                 }}
-                draggable
+                draggable={!isFreeDragging}
                 onDragStart={(e) => {
+                  if (freeDrag) {
+                    e.preventDefault();
+                    return;
+                  }
                   e.dataTransfer.setData("text/plain", key);
                   e.dataTransfer.effectAllowed = "move";
                 }}
@@ -1495,11 +1601,24 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                   setDropTarget(null);
                   if (src) moveStepBefore(src.split(",").map(Number), stepPath);
                 }}
-                className={`relative w-full rounded-xl border-2 transition-colors ${
+                className={`relative w-full rounded-xl border-2 transition-[transform,border-color] duration-150 ${
                   dropTarget === key
                     ? "border-blue-500 border-dashed"
                     : "border-blue-400"
+                } ${
+                  step.id && step.id === editingTargetId
+                    ? "ring-2 ring-[#6366f1]"
+                    : ""
                 }`}
+                style={{
+                  transform:
+                    isFreeDragging || posX || posY
+                      ? `translate(${isFreeDragging ? freeDrag.x : posX}px, ${
+                          isFreeDragging ? freeDrag.y : posY
+                        }px)`
+                      : undefined,
+                  transition: isFreeDragging ? "none" : undefined,
+                }}
               >
                 <button
                   type="button"
@@ -1517,6 +1636,47 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                     {stepSummary(step, members, templates, agents, dbSources, list)}
                   </p>
                   <p className="mt-2 text-xs text-blue-500">انقر للتعديل</p>
+                </button>
+                <button
+                  type="button"
+                  title="تحريك حر — اسحب لإزاحة البطاقة"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    setFreeDrag({
+                      key,
+                      startX: e.clientX,
+                      startY: e.clientY,
+                      origX: posX,
+                      origY: posY,
+                      x: posX,
+                      y: posY,
+                    });
+                  }}
+                  onPointerMove={(e) => {
+                    if (!freeDrag || freeDrag.key !== key) return;
+                    const x = freeDrag.origX + e.clientX - freeDrag.startX;
+                    const y = freeDrag.origY + e.clientY - freeDrag.startY;
+                    setFreeDrag({ ...freeDrag, x, y });
+                    requestAnimationFrame(() => drawWires());
+                  }}
+                  onPointerUp={(e) => {
+                    if (!freeDrag || freeDrag.key !== key) return;
+                    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                      e.currentTarget.releasePointerCapture(e.pointerId);
+                    }
+                    const { x, y } = freeDrag;
+                    setFreeDrag(null);
+                    setSteps((prev) =>
+                      updateStepAtPath(prev, stepPath, {
+                        pos: { x: Math.round(x), y: Math.round(y) },
+                      })
+                    );
+                  }}
+                  className="absolute -start-2 -top-2 cursor-grab rounded-full border bg-background p-1 text-muted-foreground shadow-sm transition-colors hover:text-foreground active:cursor-grabbing"
+                >
+                  <GripVertical className="h-3 w-3" />
                 </button>
                 <button
                   type="button"
@@ -1575,6 +1735,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   }) {
     const list = getListAtPath(steps, listPath);
     const endKey = `end:${listPath.join(",")}`;
+    const hKey = `${listPath.join(",")}:h`;
     const toneCls =
       tone === "green"
         ? "bg-green-100 text-green-700"
@@ -1585,6 +1746,10 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
       <div className="flex w-56 shrink-0 flex-col items-center">
         <div className="h-4 w-px bg-border" />
         <span
+          ref={(el) => {
+            if (el) cardRefs.current.set(hKey, el);
+            else cardRefs.current.delete(hKey);
+          }}
           className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${toneCls}`}
         >
           {title}
@@ -1683,6 +1848,10 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             {/* عقدة المحفّز */}
             <button
               type="button"
+              ref={(el) => {
+                if (el) cardRefs.current.set("trigger", el);
+                else cardRefs.current.delete("trigger");
+              }}
               onClick={() => setConditionsOpen(true)}
               className="w-full rounded-xl border-2 border-green-500 bg-green-50/70 p-4 text-start shadow-sm transition-shadow hover:shadow-md"
             >
@@ -1698,11 +1867,11 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             </button>
 
             {/* الخطوات — سلسلة رئيسية تتفرع مرئياً عند كل IF */}
-            <div className="h-6 w-px bg-border" />
+            <div className="h-6 w-px" />
             <StepChain listPath={[]} />
 
             {/* إضافة خطوة */}
-            <div className="h-6 w-px bg-border" />
+            <div className="h-6 w-px" />
             <button
               type="button"
               onClick={() => setEditor({ path: [], isNew: true })}
@@ -1727,7 +1896,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           </div>
         </div>
 
-        {/* أسهم GOTO — طبقة فوق البطاقات لا تلتقط الأحداث */}
+        {/* خطوط الوصل وأسهم GOTO — طبقة فوق البطاقات لا تلتقط الأحداث */}
         <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full">
           <defs>
             <marker
@@ -1741,17 +1910,42 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               <path d="M0,0 L8,4 L0,8 z" fill="#6366f1" />
             </marker>
           </defs>
-          {arrows.map((a) => (
-            <path
-              key={a.key}
-              d={a.d}
-              fill="none"
-              stroke="#6366f1"
-              strokeWidth={2}
-              strokeDasharray="6 4"
-              markerEnd="url(#goto-arrow)"
-            />
-          ))}
+          {wires.map((w) =>
+            w.kind === "goto" ? (
+              <g key={w.key}>
+                <path
+                  d={w.d}
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth={2.5}
+                  markerEnd="url(#goto-arrow)"
+                />
+                {w.label && (
+                  <text
+                    x={w.midX}
+                    y={w.midY}
+                    fill="#6366f1"
+                    fontSize={10}
+                    textAnchor="middle"
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                    className="select-none"
+                  >
+                    {w.label}
+                  </text>
+                )}
+              </g>
+            ) : (
+              <path
+                key={w.key}
+                d={w.d}
+                fill="none"
+                stroke="#94a3b8"
+                strokeWidth={1.5}
+              />
+            )
+          )}
         </svg>
       </div>
 

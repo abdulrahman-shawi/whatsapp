@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { collectAgentKnowledge } from "@/lib/retrieval";
 
 // اقتراح رد ذكي بناءً على تعليمات الوكيل ومصادر المعرفة وآخر ١٠ رسائل
 export async function POST(
@@ -15,6 +16,7 @@ export async function POST(
     where: { id: params.id, workspaceId: ctx.workspaceId },
     include: {
       agent: { include: { knowledgeSources: true } },
+      contact: { select: { waPhone: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 10 },
     },
   });
@@ -34,8 +36,14 @@ export async function POST(
   const systemPrompt =
     conversation.agent?.systemPrompt ??
     "أنت مساعد خدمة عملاء محترف. ردّ بالعربية بشكل مختصر ومفيد.";
-  const knowledge =
-    conversation.agent?.knowledgeSources.map((k) => k.content) ?? [];
+  // آخر رسالة واردة سؤالاً للاسترجاع + رقم العميل لاستعلامات DB
+  const lastInbound =
+    conversation.messages.find((m) => m.direction === "INBOUND")?.body ?? "";
+  const knowledge = await collectAgentKnowledge(
+    conversation.agent?.knowledgeSources ?? [],
+    lastInbound,
+    conversation.contact.waPhone
+  );
 
   // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
   const aiConfig = await resolveAiConfig(ctx.workspaceId);

@@ -3,8 +3,50 @@ import mammoth from "mammoth";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { runKnowledgeQuery, validateDbQuery } from "@/lib/db-knowledge";
 
 type Params = { params: { id: string } };
+
+// التحقق من حقول مصدر قاعدة البيانات — يعيد البيانات أو رسالة خطأ
+function validateDbSource(body: Record<string, unknown>):
+  | { data: {
+      title: string;
+      dbEngine: "mysql" | "postgres";
+      dbHost: string;
+      dbPort?: number;
+      dbName?: string;
+      dbUser?: string;
+      dbPassword?: string;
+      dbQuery: string;
+    } }
+  | { error: string } {
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const engine = body.dbEngine;
+  const host = typeof body.dbHost === "string" ? body.dbHost.trim() : "";
+  const query = typeof body.dbQuery === "string" ? body.dbQuery.trim() : "";
+  if (!title) return { error: "عنوان المصدر مطلوب" };
+  if (engine !== "mysql" && engine !== "postgres") {
+    return { error: "المحرك يجب أن يكون mysql أو postgres" };
+  }
+  if (!host) return { error: "عنوان الخادم (host) مطلوب" };
+  if (!query) return { error: "الاستعلام مطلوب" };
+  const queryError = validateDbQuery(query);
+  if (queryError) return { error: queryError };
+
+  const port = Number(body.dbPort);
+  return {
+    data: {
+      title,
+      dbEngine: engine,
+      dbHost: host,
+      dbPort: Number.isFinite(port) && port > 0 ? port : undefined,
+      dbName: typeof body.dbName === "string" && body.dbName.trim() ? body.dbName.trim() : undefined,
+      dbUser: typeof body.dbUser === "string" && body.dbUser.trim() ? body.dbUser.trim() : undefined,
+      dbPassword: typeof body.dbPassword === "string" && body.dbPassword ? body.dbPassword : undefined,
+      dbQuery: query,
+    },
+  };
+}
 
 // استخراج نص من ملف مرفوع حسب امتداده
 async function extractText(
@@ -87,6 +129,54 @@ export async function POST(req: Request, { params }: Params) {
 
   // مصدر نصي
   const body = await req.json().catch(() => null);
+
+  // مصدر قاعدة بيانات خارجية (MySQL/Postgres)
+  if (body?.type === "DB") {
+    const fields = validateDbSource(body);
+    if ("error" in fields) {
+      return NextResponse.json({ error: fields.error }, { status: 400 });
+    }
+    const data = fields.data;
+
+    // وضع الاختبار: ننفّذ الاستعلام برقم تجريبي ونعيد عينة من النتائج دون حفظ
+    if (body.test === true) {
+      const result = await runKnowledgeQuery(
+        {
+          dbEngine: data.dbEngine,
+          dbHost: data.dbHost,
+          dbPort: data.dbPort ?? null,
+          dbName: data.dbName ?? null,
+          dbUser: data.dbUser ?? null,
+          dbPassword: data.dbPassword ?? null,
+          dbQuery: data.dbQuery,
+        },
+        typeof body.testPhone === "string" && body.testPhone.trim()
+          ? body.testPhone.trim()
+          : "000000000000"
+      );
+      return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+    }
+
+    const source = await prisma.knowledgeSource.create({
+      data: {
+        agentId: params.id,
+        type: "DB",
+        title: data.title,
+        content: `استعلام ${data.dbEngine}: ${data.dbQuery.slice(0, 200)}`,
+        dbEngine: data.dbEngine,
+        dbHost: data.dbHost,
+        dbPort: data.dbPort,
+        dbName: data.dbName,
+        dbUser: data.dbUser,
+        dbPassword: data.dbPassword,
+        dbQuery: data.dbQuery,
+      },
+    });
+    // لا نعيد كلمات المرور للعميل أبداً
+    const { dbPassword: _omit, ...safeSource } = source;
+    return NextResponse.json({ source: safeSource }, { status: 201 });
+  }
+
   if (
     !body ||
     typeof body.title !== "string" ||

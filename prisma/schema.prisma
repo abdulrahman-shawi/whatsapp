@@ -20,6 +20,7 @@ enum MemberRole {
 enum KnowledgeType {
   TEXT
   FILE
+  DB // قاعدة بيانات خارجية (MySQL/Postgres) — يُقرأ منها عند كل رسالة
 }
 
 // منصة المحادثة
@@ -169,7 +170,7 @@ model Agent {
   conversations    Conversation[]
 }
 
-// مصدر معرفة: نص أو ملف يعتمد عليه الوكيل في الردود
+// مصدر معرفة: نص أو ملف أو قاعدة بيانات خارجية يعتمد عليها الوكيل في الردود
 model KnowledgeSource {
   id        String        @id @default(cuid())
   agentId   String
@@ -177,6 +178,16 @@ model KnowledgeSource {
   title     String
   content   String        @db.Text
   fileUrl   String?
+  // بيانات اتصال مصدر DB (تُملأ فقط عند type = DB)
+  dbEngine  String? // mysql | postgres
+  dbHost    String?
+  dbPort    Int?
+  dbName    String?
+  dbUser    String?
+  dbPassword String? // كلمة مرور الاتصال — تُخزن كنص صريح حالياً
+  // استعلام القراءة مع العنصر النائب {{phone}} لرقم العميل، مثال:
+  // SELECT name, balance FROM customers WHERE phone = {{phone}}
+  dbQuery   String?       @db.Text
   createdAt DateTime      @default(now())
   agent     Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
 }

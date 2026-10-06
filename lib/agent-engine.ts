@@ -2,7 +2,7 @@ import type { Agent, KnowledgeSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
-import { retrieveRelevantKnowledge } from "@/lib/retrieval";
+import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
 
@@ -180,7 +180,12 @@ async function runPipeline(
         role: m.direction === "INBOUND" ? ("user" as const) : ("assistant" as const),
         content: m.body,
       }));
-    const knowledge = retrieveRelevantKnowledge(agent.knowledgeSources, text);
+    // معرفة الوكيل: نصوص وملفات + نتائج استعلامات قواعد البيانات الخارجية لرقم العميل
+    const knowledge = await collectAgentKnowledge(
+      agent.knowledgeSources,
+      text,
+      waPhone
+    );
     // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
     const aiConfig = await resolveAiConfig(workspaceId);
     const aiReply = await generateReply(history, agent.systemPrompt, knowledge, aiConfig);

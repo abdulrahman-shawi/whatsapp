@@ -37,6 +37,9 @@ export default async function EditAgentPage({
             title: s.title,
             type: s.type,
             content: s.content,
+            dbEngine: s.dbEngine,
+            dbHost: s.dbHost,
+            dbQuery: s.dbQuery,
           })),
         }}
       />

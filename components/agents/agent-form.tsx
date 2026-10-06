@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, FileUp, Loader2, Plus, Trash2, X } from "lucide-react";
+import { FileText, FileUp, Loader2, Plus, Trash2, X, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +20,11 @@ import { TestChat } from "./test-chat";
 export type KnowledgeItem = {
   id: string;
   title: string;
-  type: "TEXT" | "FILE";
+  type: "TEXT" | "FILE" | "DB";
   content: string;
+  dbEngine?: string | null;
+  dbHost?: string | null;
+  dbQuery?: string | null;
 };
 
 export type AgentFormData = {
@@ -65,6 +68,20 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
   const [pendingSources, setPendingSources] = useState<PendingSource[]>([]);
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceContent, setSourceContent] = useState("");
+  // حقول مصدر قاعدة البيانات الخارجية
+  const [dbTitle, setDbTitle] = useState("");
+  const [dbEngine, setDbEngine] = useState<"mysql" | "postgres">("mysql");
+  const [dbHost, setDbHost] = useState("");
+  const [dbPort, setDbPort] = useState("3306");
+  const [dbName, setDbName] = useState("");
+  const [dbUser, setDbUser] = useState("");
+  const [dbPassword, setDbPassword] = useState("");
+  const [dbQuery, setDbQuery] = useState("");
+  const [dbTesting, setDbTesting] = useState(false);
+  const [dbTestResult, setDbTestResult] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [keywordInput, setKeywordInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -134,6 +151,66 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
   async function deleteSource(id: string) {
     const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
     if (res.ok) setSources(sources.filter((s) => s.id !== id));
+  }
+
+  // حمولة مصدر DB المشتركة بين الاختبار والحفظ
+  function dbPayload(test: boolean) {
+    return {
+      type: "DB",
+      test,
+      title: dbTitle,
+      dbEngine,
+      dbHost,
+      dbPort: dbPort ? Number(dbPort) : undefined,
+      dbName,
+      dbUser,
+      dbPassword,
+      dbQuery,
+    };
+  }
+
+  // اختبار الاتصال والاستعلام: يُنفَّذ برقم تجريبي ويعرض عينة من النتائج
+  async function testDbSource() {
+    if (!isEdit) return;
+    setDbTesting(true);
+    setDbTestResult(null);
+    try {
+      const res = await fetch(`/api/agents/${agent!.id}/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dbPayload(true)),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        setDbTestResult({
+          ok: true,
+          text: data.rowCount > 0 ? data.text : "الاتصال ناجح — الاستعلام أعاد 0 صفوف",
+        });
+      } else {
+        setDbTestResult({ ok: false, text: data?.error ?? "فشل الاختبار" });
+      }
+    } finally {
+      setDbTesting(false);
+    }
+  }
+
+  // حفظ مصدر قاعدة البيانات — متاح فقط بعد إنشاء الوكيل
+  async function addDbSource() {
+    if (!isEdit) return;
+    const res = await fetch(`/api/agents/${agent!.id}/knowledge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(dbPayload(false)),
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok) {
+      setSources((prev) => [...prev, data.source]);
+      setDbTitle("");
+      setDbQuery("");
+      setDbTestResult(null);
+    } else {
+      setError(data?.error ?? "فشل حفظ مصدر قاعدة البيانات");
+    }
   }
 
   // حفظ الوكيل: إنشاء مع مصادره المعلّقة، أو تحديث
@@ -230,8 +307,16 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
                       <span className="truncate text-sm font-medium">
                         {s.title}
                       </span>
-                      <Badge variant={s.type === "FILE" ? "default" : "secondary"}>
-                        {s.type === "FILE" ? "ملف" : "نص"}
+                      <Badge
+                        variant={
+                          s.type === "FILE"
+                            ? "default"
+                            : s.type === "DB"
+                              ? "warning"
+                              : "secondary"
+                        }
+                      >
+                        {s.type === "FILE" ? "ملف" : s.type === "DB" ? "قاعدة بيانات" : "نص"}
                       </Badge>
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
@@ -342,6 +427,121 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
             ) : (
               <p className="mt-2 text-xs text-muted-foreground">
                 احفظ الوكيل أولاً لتتمكن من رفع الملفات — يمكنك إضافة نصوص الآن
+              </p>
+            )}
+          </div>
+
+          {/* ربط قاعدة بيانات خارجية — يقرأ منها الوكيل عند كل رسالة */}
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Database className="h-4 w-4" />
+              ربط قاعدة بيانات (MySQL / Postgres)
+            </div>
+            <p className="text-xs text-muted-foreground">
+              يقرأ الوكيل من جداول عملاءك ويردّ بناءً عليها مع مصادر المعرفة
+              الأخرى. استخدم <code dir="ltr">{"{{phone}}"}</code> داخل الاستعلام
+              ليُستبدل برقم العميل تلقائياً (استعلامات SELECT فقط).
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                value={dbTitle}
+                onChange={(e) => setDbTitle(e.target.value)}
+                placeholder="عنوان المصدر (مثال: بيانات العملاء)"
+              />
+              <select
+                value={dbEngine}
+                onChange={(e) => setDbEngine(e.target.value as "mysql" | "postgres")}
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              >
+                <option value="mysql">MySQL</option>
+                <option value="postgres">PostgreSQL</option>
+              </select>
+              <Input
+                value={dbHost}
+                onChange={(e) => setDbHost(e.target.value)}
+                placeholder="الخادم — مثال: db.example.com"
+                dir="ltr"
+              />
+              <Input
+                value={dbPort}
+                onChange={(e) => setDbPort(e.target.value)}
+                placeholder="المنفذ (3306 / 5432)"
+                dir="ltr"
+              />
+              <Input
+                value={dbName}
+                onChange={(e) => setDbName(e.target.value)}
+                placeholder="اسم القاعدة"
+                dir="ltr"
+              />
+              <Input
+                value={dbUser}
+                onChange={(e) => setDbUser(e.target.value)}
+                placeholder="اسم المستخدم"
+                dir="ltr"
+              />
+              <Input
+                type="password"
+                value={dbPassword}
+                onChange={(e) => setDbPassword(e.target.value)}
+                placeholder="كلمة المرور"
+                dir="ltr"
+              />
+            </div>
+            <Textarea
+              value={dbQuery}
+              onChange={(e) => setDbQuery(e.target.value)}
+              placeholder={'SELECT name, balance FROM customers WHERE phone = {{phone}}'}
+              rows={3}
+              dir="ltr"
+              className="text-left font-mono text-xs"
+            />
+            {dbTestResult && (
+              <pre
+                className={`max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
+                  dbTestResult.ok
+                    ? "border-green-200 bg-green-50 text-green-700"
+                    : "border-red-200 bg-red-50 text-red-700"
+                }`}
+                dir="ltr"
+              >
+                {dbTestResult.text}
+              </pre>
+            )}
+            {isEdit ? (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={testDbSource}
+                  disabled={
+                    dbTesting ||
+                    !dbTitle.trim() ||
+                    !dbHost.trim() ||
+                    !dbQuery.trim()
+                  }
+                >
+                  {dbTesting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Database className="h-4 w-4" />
+                  )}
+                  {dbTesting ? "جارٍ الاختبار…" : "اختبار الاتصال"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={addDbSource}
+                  disabled={!dbTitle.trim() || !dbHost.trim() || !dbQuery.trim()}
+                >
+                  <Plus className="h-4 w-4" />
+                  حفظ المصدر
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                احفظ الوكيل أولاً ثم عد لإضافة مصادر قواعدة البيانات
               </p>
             )}
           </div>

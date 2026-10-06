@@ -20,8 +20,14 @@ export type IfCondition =
   | { kind: "STAGE"; stage: string } // حالة العميل تساوي…
   | { kind: "HAS_TAG"; tag: string } // العميل يحمل الوسم…
   | { kind: "TEXT_CONTAINS"; text: string } // آخر رسالة تحتوي النص…
-  | { kind: "BUSINESS_HOURS" } // الوقت الحالي ضمن ساعات العمل المضبوطة
-  | { kind: "DB_CONTAINS"; text: string }; // نتيجة QUERY_DB الأخيرة تحتوي النص…
+  | { kind: "BUSINESS_HOURS" } // الوقت الحالي ضمن ساعات العمل المضبوطة في التكاملات
+  | { kind: "DB_CONTAINS"; text: string } // نتيجة QUERY_DB الأخيرة تحتوي النص…
+  | { kind: "HAS_ASSIGNEE" } // للمحادثة موظف مسند واحد على الأقل
+  | { kind: "STATUS_IS"; status: "AI" | "MANUAL" | "HANDED_OFF" } // حالة المحادثة
+  | { kind: "HOURS_BETWEEN"; from: number; to: number } // الساعة الحالية بين ساعتين (0-23)
+  | { kind: "DAY_OF_WEEK"; days: number[] } // اليوم الحالي ضمن أيام محددة (0=الأحد)
+  | { kind: "MESSAGE_COUNT_MIN"; count: number } // عدد رسائل المحادثة لا يقل عن…
+  | { kind: "IS_CLOSED" }; // المحادثة مغلقة
 
 // أنواع خطوات سير العمل — تُخزن كعناصر داخل مصفوفة steps (JSON)
 // الخطوات متداخلة عبر IF: لكل شرط فرعان then/else وكل منهما قائمة خطوات
@@ -91,8 +97,8 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "IF", label: "شرط (إذا)" },
 ] as const;
 
-const MAX_TOTAL_STEPS = 30;
-const MAX_DEPTH = 1; // تفرع واحد — لا IF متداخلة
+const MAX_TOTAL_STEPS = 40;
+const MAX_DEPTH = 4; // عمق تداخل الشروط — منع استعلامات بلا حدود
 
 // عدّ الخطوات شاملاً الفروع المتداخلة
 function countSteps(steps: WorkflowStep[]): number {
@@ -119,8 +125,41 @@ function validateCondition(cond: IfCondition | undefined, label: string, errors:
     case "DB_CONTAINS":
       if (!cond.text?.trim()) errors.push(`${label}: نص الشرط مطلوب`);
       break;
+    case "HOURS_BETWEEN": {
+      const from = Number(cond.from);
+      const to = Number(cond.to);
+      if (
+        !Number.isInteger(from) || !Number.isInteger(to) ||
+        from < 0 || from > 23 || to < 0 || to > 23 || from >= to
+      ) {
+        errors.push(`${label}: ساعتا البداية والنهاية بين 0 و23 والبداية قبل النهاية`);
+      }
+      break;
+    }
+    case "DAY_OF_WEEK": {
+      const days = Array.isArray(cond.days) ? cond.days : [];
+      const valid = days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+      if (days.length === 0 || !valid) {
+        errors.push(`${label}: اختر يوماً واحداً على الأقل (0-6)`);
+      }
+      break;
+    }
+    case "MESSAGE_COUNT_MIN": {
+      const count = Number(cond.count);
+      if (!Number.isInteger(count) || count < 1 || count > 1000) {
+        errors.push(`${label}: العدد عدد صحيح بين 1 و1000`);
+      }
+      break;
+    }
+    case "STATUS_IS":
+      if (!["AI", "MANUAL", "HANDED_OFF"].includes(cond.status)) {
+        errors.push(`${label}: حالة المحادثة غير صالحة`);
+      }
+      break;
     case "BUSINESS_HOURS":
-      break; // لا يحتاج إعداداً — يُضبط من صفحة التكاملات
+    case "HAS_ASSIGNEE":
+    case "IS_CLOSED":
+      break; // بلا إعدادات إضافية
     default:
       errors.push(`${label}: نوع شرط غير معروف`);
   }
@@ -182,13 +221,12 @@ export function validateSteps(
           break;
         case "GOTO":
           if (
-            depth > 0 ||
             !Number.isInteger(step.step) ||
             step.step < 1 ||
-            step.step > steps.length
+            step.step > list.length
           ) {
             errors.push(
-              `${label}: القفز متاح في المستوى الرئيسي فقط وإلى خطوة بين 1 و${steps.length} (للأمام)`
+              `${label}: القفز إلى خطوة بين 1 و${list.length} في نفس المستوى (للأمام)`
             );
           }
           break;
@@ -404,6 +442,42 @@ async function evaluateCondition(
       return isBusinessHours(ctx.workspaceId);
     case "DB_CONTAINS":
       return (ctx.vars["db"] ?? "").toLowerCase().includes(cond.text.trim().toLowerCase());
+    case "HAS_ASSIGNEE": {
+      if (!ctx.conversationId) return false;
+      const count = await prisma.conversationAssignee.count({
+        where: { conversationId: ctx.conversationId },
+      });
+      return count > 0;
+    }
+    case "STATUS_IS": {
+      if (!ctx.conversationId) return false;
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: ctx.conversationId },
+        select: { status: true },
+      });
+      return conversation?.status === cond.status;
+    }
+    case "HOURS_BETWEEN": {
+      const h = new Date().getHours();
+      return h >= cond.from && h < cond.to;
+    }
+    case "DAY_OF_WEEK":
+      return (cond.days ?? []).includes(new Date().getDay());
+    case "MESSAGE_COUNT_MIN": {
+      if (!ctx.conversationId) return false;
+      const count = await prisma.message.count({
+        where: { conversationId: ctx.conversationId, isNote: false },
+      });
+      return count >= cond.count;
+    }
+    case "IS_CLOSED": {
+      if (!ctx.conversationId) return false;
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: ctx.conversationId },
+        select: { closedAt: true },
+      });
+      return conversation?.closedAt != null;
+    }
     default:
       return false;
   }

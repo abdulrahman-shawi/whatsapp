@@ -37,6 +37,18 @@ type WorkflowRow = {
 
 type Props = { workflows: WorkflowRow[] };
 
+// عدّاد الخطوات شاملاً فروع IF المتداخلة
+function countSteps(steps: unknown): number {
+  if (!Array.isArray(steps)) return 0;
+  return (steps as Record<string, unknown>[]).reduce((n, s) => {
+    let c = 1;
+    if (s?.type === "IF") {
+      c += countSteps(s.then) + countSteps(s["else"]);
+    }
+    return n + c;
+  }, 0);
+}
+
 // صف وصف المحفّز باختصار: الكلمات أو الأرقام أو الحالات
 function triggerSummary(w: WorkflowRow): string {
   const tc = (w.triggerConfig ?? {}) as Record<string, unknown>;
@@ -141,9 +153,7 @@ export function WorkflowsClient({ workflows }: Props) {
                     <td className="max-w-40 truncate py-3 text-muted-foreground">
                       {triggerSummary(w)}
                     </td>
-                    <td className="py-3">
-                      {Array.isArray(w.steps) ? w.steps.length : 0} خطوة
-                    </td>
+                    <td className="py-3">{countSteps(w.steps)} خطوة</td>
                     <td className="py-3 text-muted-foreground">
                       {new Date(w.createdAt).toLocaleString("ar", {
                         dateStyle: "short",

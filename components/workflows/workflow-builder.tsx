@@ -46,14 +46,34 @@ type IfCondition =
   | { kind: "HAS_TAG"; tag: string }
   | { kind: "TEXT_CONTAINS"; text: string }
   | { kind: "BUSINESS_HOURS" }
-  | { kind: "DB_CONTAINS"; text: string };
+  | { kind: "DB_CONTAINS"; text: string }
+  | { kind: "HAS_ASSIGNEE" }
+  | { kind: "STATUS_IS"; status: string }
+  | { kind: "HOURS_BETWEEN"; from: number; to: number }
+  | { kind: "DAY_OF_WEEK"; days: number[] }
+  | { kind: "MESSAGE_COUNT_MIN"; count: number }
+  | { kind: "IS_CLOSED" };
 
-type OptionLists = {
-  members: { id: string; name: string }[];
-  templates: { id: string; name: string }[];
-  agents: { id: string; name: string }[];
-  dbSources: { id: string; title: string }[];
+// أيام الأسبوع بترتيبها العربي (السبت أولاً) — القيم كما في Date.getDay()
+const WEEK_DAYS = [
+  { value: 6, label: "السبت" },
+  { value: 0, label: "الأحد" },
+  { value: 1, label: "الاثنين" },
+  { value: 2, label: "الثلاثاء" },
+  { value: 3, label: "الأربعاء" },
+  { value: 4, label: "الخميس" },
+  { value: 5, label: "الجمعة" },
+];
+
+const CONVERSATION_STATUS_LABELS: Record<string, string> = {
+  AI: "رد آلي",
+  MANUAL: "تحكم بشري",
+  HANDED_OFF: "تم التسليم",
 };
+
+function dayLabel(value: number): string {
+  return WEEK_DAYS.find((d) => d.value === value)?.label ?? String(value);
+}
 
 type Props = {
   workflow?: {
@@ -166,6 +186,18 @@ function conditionSummary(cond: IfCondition): string {
       return "ضمن ساعات العمل";
     case "DB_CONTAINS":
       return `نتيجة قاعدة البيانات تحتوي "${cond.text || "—"}"`;
+    case "HAS_ASSIGNEE":
+      return "للمحادثة موظف مسند";
+    case "STATUS_IS":
+      return `حالة المحادثة: ${CONVERSATION_STATUS_LABELS[cond.status] ?? cond.status}`;
+    case "HOURS_BETWEEN":
+      return `الساعة بين ${cond.from ?? 0} و${cond.to ?? 23}`;
+    case "DAY_OF_WEEK":
+      return `أيام: ${(cond.days ?? []).map(dayLabel).join("، ") || "—"}`;
+    case "MESSAGE_COUNT_MIN":
+      return `عدد رسائل العميل ≥ ${cond.count ?? 1}`;
+    case "IS_CLOSED":
+      return "المحادثة مغلقة";
   }
 }
 
@@ -225,240 +257,6 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
   }
 }
 
-// محرّر فروع الخطوة IF: صف مضغوط لكل خطوة بحقول إعداد inline
-function BranchEditor({
-  branch,
-  onChange,
-  members,
-  templates,
-  agents,
-  dbSources,
-}: {
-  branch: Step[];
-  onChange: (next: Step[]) => void;
-  members: { id: string; name: string }[];
-  templates: { id: string; name: string }[];
-  agents: { id: string; name: string }[];
-  dbSources: { id: string; title: string }[];
-}) {
-  const selectCls = "w-full rounded-md border bg-background px-2 py-1.5 text-sm";
-
-  function update(i: number, patch: Partial<Step>) {
-    onChange(branch.map((s, j) => (j === i ? { ...s, ...patch } : s)));
-  }
-
-  function fields(step: Step, patch: (p: Partial<Step>) => void) {
-    switch (step.type) {
-      case "SEND_MESSAGE":
-        return (
-          <Textarea
-            value={(step.body as string) ?? ""}
-            onChange={(e) => patch({ body: e.target.value })}
-            placeholder="نص الرسالة…"
-            rows={2}
-          />
-        );
-      case "SEND_MEDIA":
-        return (
-          <>
-            <Input
-              value={(step.url as string) ?? ""}
-              onChange={(e) => patch({ url: e.target.value })}
-              placeholder="https://… (صورة/فيديو/PDF)"
-              dir="ltr"
-            />
-            <Input
-              value={(step.caption as string) ?? ""}
-              onChange={(e) => patch({ caption: e.target.value })}
-              placeholder="تسمية اختيارية"
-            />
-          </>
-        );
-      case "REQUEST_LOCATION":
-        return (
-          <Input
-            value={(step.prompt as string) ?? ""}
-            onChange={(e) => patch({ prompt: e.target.value })}
-            placeholder="نص طلب الموقع (اختياري)"
-          />
-        );
-      case "ASSIGN":
-        return (
-          <select
-            value={(step.userId as string) ?? "any"}
-            onChange={(e) => patch({ userId: e.target.value })}
-            className={selectCls}
-          >
-            <option value="any">أول عضو متاح في الفريق</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        );
-      case "SET_AGENT":
-        return (
-          <select
-            value={(step.agentId as string) ?? ""}
-            onChange={(e) => patch({ agentId: e.target.value })}
-            className={selectCls}
-          >
-            <option value="">اختر وكيلاً…</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        );
-      case "SET_STAGE":
-        return (
-          <select
-            value={(step.stage as string) ?? "NEW"}
-            onChange={(e) => patch({ stage: e.target.value })}
-            className={selectCls}
-          >
-            {CONTACT_STAGES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        );
-      case "ADD_TAG":
-      case "REMOVE_TAG":
-        return (
-          <Input
-            value={(step.tag as string) ?? ""}
-            onChange={(e) => patch({ tag: e.target.value })}
-            placeholder={step.type === "ADD_TAG" ? "وسم للإضافة" : "وسم للإزالة"}
-          />
-        );
-      case "ADD_NOTE":
-        return (
-          <Textarea
-            value={(step.body as string) ?? ""}
-            onChange={(e) => patch({ body: e.target.value })}
-            placeholder="نص الملاحظة الداخلية"
-            rows={2}
-          />
-        );
-      case "QUERY_DB":
-        return (
-          <select
-            value={(step.sourceId as string) ?? ""}
-            onChange={(e) => patch({ sourceId: e.target.value })}
-            className={selectCls}
-          >
-            <option value="">اختر مصدر بيانات…</option>
-            {dbSources.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.title}
-              </option>
-            ))}
-          </select>
-        );
-      case "WAIT":
-        return (
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              min={1}
-              value={(step.minutes as number) ?? 30}
-              onChange={(e) => patch({ minutes: Number(e.target.value) || 1 })}
-              className="w-24"
-              dir="ltr"
-            />
-            <span className="text-xs text-muted-foreground">دقيقة</span>
-          </div>
-        );
-      case "WEBHOOK":
-        return (
-          <Input
-            value={(step.url as string) ?? ""}
-            onChange={(e) => patch({ url: e.target.value })}
-            placeholder="https://example.com/hook"
-            dir="ltr"
-          />
-        );
-      case "CREATE_BOOKING":
-        return (
-          <>
-            <Input
-              value={(step.title as string) ?? ""}
-              onChange={(e) => patch({ title: e.target.value })}
-              placeholder="عنوان الحجز"
-            />
-            <Input
-              type="datetime-local"
-              value={(step.scheduledAt as string) ?? ""}
-              onChange={(e) => patch({ scheduledAt: e.target.value })}
-              dir="ltr"
-            />
-            <Textarea
-              value={(step.notes as string) ?? ""}
-              onChange={(e) => patch({ notes: e.target.value })}
-              placeholder="ملاحظات (اختياري)"
-              rows={2}
-            />
-          </>
-        );
-      default:
-        return (
-          <p className="text-xs text-muted-foreground">
-            {stepSummary(step, members, templates, agents, dbSources) || "بدون إعدادات"}
-          </p>
-        );
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      {branch.map((step, i) => {
-        const meta = stepMeta(step.type);
-        return (
-          <div key={i} className="space-y-1.5 rounded-lg border bg-muted/30 p-2">
-            <div className="flex items-center gap-1.5">
-              <meta.icon className="h-3.5 w-3.5 shrink-0" style={{ color: meta.color }} />
-              <select
-                value={step.type}
-                onChange={(e) =>
-                  onChange(branch.map((s, j) => (j === i ? emptyStep(e.target.value) : s)))
-                }
-                className={selectCls}
-              >
-                {STEP_TYPES.filter((s) => s.type !== "IF" && s.type !== "GOTO").map((s) => (
-                  <option key={s.type} value={s.type}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => onChange(branch.filter((_, j) => j !== i))}
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-                title="حذف"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {fields(step, (p) => update(i, p))}
-          </div>
-        );
-      })}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onChange([...branch, emptyStep("SEND_MESSAGE")])}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        إضافة للفرع
-      </Button>
-    </div>
-  );
-}
-
 // محرّر سير العمل المرئي: canvas منقّط ببطاقات متصلة + نوافذ منبثقة
 export function WorkflowBuilder({ workflow, runs, members, templates, agents, dbSources }: Props) {
   const router = useRouter();
@@ -488,15 +286,71 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // نافذة الإضافة/التعديل: null مغلقة، -1 إضافة جديدة، وإلا فهرس الخطوة
-  const [editor, setEditor] = useState<number | null>(null);
+  // نافذة الإضافة/التعديل: null مغلقة، وإلا مسار قائمة (إضافة) أو مسار خطوة (تعديل)
+  const [editor, setEditor] = useState<{ path: number[]; isNew: boolean } | null>(null);
   // لوحة الشروط الجانبية
   const [conditionsOpen, setConditionsOpen] = useState(false);
 
-  const editingStep = editor !== null && editor >= 0 ? steps[editor] : null;
+  const editingStep =
+    editor && !editor.isNew ? getStepAtPath(steps, editor.path) : null;
 
-  function updateStep(index: number, patch: Partial<Step>) {
-    setSteps(steps.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  // تتبّع مسار قائمة: أزواج (فهرس خطوة، فرع 0=نعم/1=لا) نزولاً من المستوى الأعلى
+  function getListAtPath(root: Step[], path: number[]): Step[] {
+    let list = root;
+    for (let k = 0; k < path.length; k += 2) {
+      const step = list[path[k]];
+      if (!step) return [];
+      const branch = step[path[k + 1] === 0 ? "then" : "else"];
+      list = Array.isArray(branch) ? (branch as Step[]) : [];
+    }
+    return list;
+  }
+
+  function getStepAtPath(root: Step[], path: number[]): Step | null {
+    const list = getListAtPath(root, path.slice(0, -1));
+    return list[path[path.length - 1]] ?? null;
+  }
+
+  function branchListOf(step: Step, branch: number): Step[] {
+    const key = branch === 0 ? "then" : "else";
+    return Array.isArray(step[key]) ? (step[key] as Step[]) : [];
+  }
+
+  function updateStepAtPath(root: Step[], path: number[], patch: Partial<Step>): Step[] {
+    const index = path[0];
+    if (path.length === 1) {
+      return root.map((s, i) => (i === index ? { ...s, ...patch } : s));
+    }
+    const [branch, ...rest] = path.slice(1);
+    const key = branch === 0 ? "then" : "else";
+    return root.map((s, i) =>
+      i === index
+        ? { ...s, [key]: updateStepAtPath(branchListOf(s, branch), rest, patch) }
+        : s
+    );
+  }
+
+  function addStepAtPath(root: Step[], listPath: number[], step: Step): Step[] {
+    if (listPath.length === 0) return [...root, step];
+    const [index, branch, ...rest] = listPath;
+    const key = branch === 0 ? "then" : "else";
+    return root.map((s, i) =>
+      i === index
+        ? { ...s, [key]: addStepAtPath(branchListOf(s, branch ?? 0), rest, step) }
+        : s
+    );
+  }
+
+  function removeStepAtPath(root: Step[], path: number[]): Step[] {
+    const index = path[0];
+    if (path.length === 1) return root.filter((_, i) => i !== index);
+    const [branch, ...rest] = path.slice(1);
+    const key = branch === 0 ? "then" : "else";
+    return root.map((s, i) =>
+      i === index
+        ? { ...s, [key]: removeStepAtPath(branchListOf(s, branch), rest) }
+        : s
+    );
   }
 
   function addKeyword() {
@@ -551,7 +405,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   }
 
   // حقول إعداد الخطوة داخل النافذة المنبثقة
-  function stepFields(step: Step, index: number) {
+  function stepFields(step: Step, path: number[]) {
+    const update = (patch: Partial<Step>) =>
+      setSteps((prev) => updateStepAtPath(prev, path, patch));
     return (
       <div className="space-y-3 border-t pt-3">
         {step.type === "SEND_MESSAGE" && (
@@ -560,7 +416,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               <select
                 value={(step.templateId as string) ?? ""}
                 onChange={(e) =>
-                  updateStep(index, { templateId: e.target.value || undefined })
+                  update({ templateId: e.target.value || undefined })
                 }
                 className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
               >
@@ -574,7 +430,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             )}
             <Textarea
               value={(step.body as string) ?? ""}
-              onChange={(e) => updateStep(index, { body: e.target.value })}
+              onChange={(e) => update({ body: e.target.value })}
               placeholder="نص الرسالة… {{name}} تُستبدل باسم العميل"
               rows={3}
             />
@@ -583,7 +439,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "ASSIGN" && (
           <select
             value={(step.userId as string) ?? "any"}
-            onChange={(e) => updateStep(index, { userId: e.target.value })}
+            onChange={(e) => update({ userId: e.target.value })}
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           >
             <option value="any">أول عضو متاح في الفريق</option>
@@ -597,7 +453,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "SET_STAGE" && (
           <select
             value={(step.stage as string) ?? "NEW"}
-            onChange={(e) => updateStep(index, { stage: e.target.value })}
+            onChange={(e) => update({ stage: e.target.value })}
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           >
             {CONTACT_STAGES.map((s) => (
@@ -610,7 +466,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "ADD_TAG" && (
           <Input
             value={(step.tag as string) ?? ""}
-            onChange={(e) => updateStep(index, { tag: e.target.value })}
+            onChange={(e) => update({ tag: e.target.value })}
             placeholder="مثال: متابعة"
           />
         )}
@@ -621,7 +477,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               min={1}
               value={(step.minutes as number) ?? 30}
               onChange={(e) =>
-                updateStep(index, { minutes: Number(e.target.value) || 1 })
+                update({ minutes: Number(e.target.value) || 1 })
               }
               className="w-28"
               dir="ltr"
@@ -632,7 +488,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "WEBHOOK" && (
           <Input
             value={(step.url as string) ?? ""}
-            onChange={(e) => updateStep(index, { url: e.target.value })}
+            onChange={(e) => update({ url: e.target.value })}
             placeholder="https://example.com/hook"
             dir="ltr"
           />
@@ -641,13 +497,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           <>
             <Input
               value={(step.url as string) ?? ""}
-              onChange={(e) => updateStep(index, { url: e.target.value })}
+              onChange={(e) => update({ url: e.target.value })}
               placeholder="https://… (رابط مباشر لصورة/فيديو/PDF)"
               dir="ltr"
             />
             <Input
               value={(step.caption as string) ?? ""}
-              onChange={(e) => updateStep(index, { caption: e.target.value })}
+              onChange={(e) => update({ caption: e.target.value })}
               placeholder="تسمية اختيارية للوسائط"
             />
           </>
@@ -655,14 +511,14 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "REQUEST_LOCATION" && (
           <Input
             value={(step.prompt as string) ?? ""}
-            onChange={(e) => updateStep(index, { prompt: e.target.value })}
+            onChange={(e) => update({ prompt: e.target.value })}
             placeholder="نص يطلب فيه موقع العميل (اختياري)"
           />
         )}
         {step.type === "SET_AGENT" && (
           <select
             value={(step.agentId as string) ?? ""}
-            onChange={(e) => updateStep(index, { agentId: e.target.value })}
+            onChange={(e) => update({ agentId: e.target.value })}
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           >
             <option value="">اختر وكيلاً…</option>
@@ -676,14 +532,14 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "REMOVE_TAG" && (
           <Input
             value={(step.tag as string) ?? ""}
-            onChange={(e) => updateStep(index, { tag: e.target.value })}
+            onChange={(e) => update({ tag: e.target.value })}
             placeholder="مثال: متابعة"
           />
         )}
         {step.type === "ADD_NOTE" && (
           <Textarea
             value={(step.body as string) ?? ""}
-            onChange={(e) => updateStep(index, { body: e.target.value })}
+            onChange={(e) => update({ body: e.target.value })}
             placeholder="ملاحظة داخلية عن العميل…"
             rows={3}
           />
@@ -691,7 +547,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         {step.type === "QUERY_DB" && (
           <select
             value={(step.sourceId as string) ?? ""}
-            onChange={(e) => updateStep(index, { sourceId: e.target.value })}
+            onChange={(e) => update({ sourceId: e.target.value })}
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           >
             <option value="">اختر مصدر بيانات…</option>
@@ -706,18 +562,18 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
           <>
             <Input
               value={(step.title as string) ?? ""}
-              onChange={(e) => updateStep(index, { title: e.target.value })}
+              onChange={(e) => update({ title: e.target.value })}
               placeholder="عنوان الحجز"
             />
             <Input
               type="datetime-local"
               value={(step.scheduledAt as string) ?? ""}
-              onChange={(e) => updateStep(index, { scheduledAt: e.target.value })}
+              onChange={(e) => update({ scheduledAt: e.target.value })}
               dir="ltr"
             />
             <Textarea
               value={(step.notes as string) ?? ""}
-              onChange={(e) => updateStep(index, { notes: e.target.value })}
+              onChange={(e) => update({ notes: e.target.value })}
               placeholder="ملاحظات (اختياري)"
               rows={2}
             />
@@ -730,7 +586,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               min={1}
               value={(step.step as number) ?? 1}
               onChange={(e) =>
-                updateStep(index, { step: Math.max(1, Number(e.target.value) || 1) })
+                update({ step: Math.max(1, Number(e.target.value) || 1) })
               }
               className="w-28"
               dir="ltr"
@@ -744,16 +600,15 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               kind: "STAGE",
               stage: "NEW",
             };
-            const thenSteps = Array.isArray(step.then) ? (step.then as Step[]) : [];
-            const elseSteps = Array.isArray(step.else) ? (step.else as Step[]) : [];
             const setCond = (patch: Partial<IfCondition>) =>
-              updateStep(index, { condition: { ...cond, ...patch } });
-            const options = {
-              members,
-              templates,
-              agents,
-              dbSources,
-            };
+              update({ condition: { ...cond, ...patch } });
+            const days = cond.kind === "DAY_OF_WEEK" ? (cond.days ?? []) : [];
+            const toggleDay = (value: number) =>
+              setCond({
+                days: days.includes(value)
+                  ? days.filter((d) => d !== value)
+                  : [...days, value],
+              });
             return (
               <div className="space-y-3">
                 <div className="space-y-1.5">
@@ -765,14 +620,22 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                       const base: IfCondition =
                         kind === "STAGE"
                           ? { kind: "STAGE", stage: "NEW" }
-                          : kind === "BUSINESS_HOURS"
-                            ? { kind: "BUSINESS_HOURS" }
-                            : kind === "HAS_TAG"
-                              ? { kind: "HAS_TAG", tag: "" }
-                              : kind === "TEXT_CONTAINS"
-                                ? { kind: "TEXT_CONTAINS", text: "" }
-                                : { kind: "DB_CONTAINS", text: "" };
-                      updateStep(index, { condition: base });
+                          : kind === "HAS_TAG"
+                            ? { kind: "HAS_TAG", tag: "" }
+                            : kind === "TEXT_CONTAINS"
+                              ? { kind: "TEXT_CONTAINS", text: "" }
+                              : kind === "DB_CONTAINS"
+                                ? { kind: "DB_CONTAINS", text: "" }
+                                : kind === "STATUS_IS"
+                                  ? { kind: "STATUS_IS", status: "AI" }
+                                  : kind === "HOURS_BETWEEN"
+                                    ? { kind: "HOURS_BETWEEN", from: 9, to: 17 }
+                                    : kind === "DAY_OF_WEEK"
+                                      ? { kind: "DAY_OF_WEEK", days: [] }
+                                      : kind === "MESSAGE_COUNT_MIN"
+                                        ? { kind: "MESSAGE_COUNT_MIN", count: 1 }
+                                        : { kind };
+                      update({ condition: base });
                     }}
                     className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
                   >
@@ -781,6 +644,12 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                     <option value="TEXT_CONTAINS">الرسالة تحتوي</option>
                     <option value="BUSINESS_HOURS">ضمن ساعات العمل</option>
                     <option value="DB_CONTAINS">نتيجة قاعدة البيانات تحتوي</option>
+                    <option value="HAS_ASSIGNEE">لها موظف مسند</option>
+                    <option value="STATUS_IS">حالة المحادثة</option>
+                    <option value="HOURS_BETWEEN">الساعة بين وقتين</option>
+                    <option value="DAY_OF_WEEK">يوم الأسبوع</option>
+                    <option value="MESSAGE_COUNT_MIN">عدد رسائل العميل</option>
+                    <option value="IS_CLOSED">المحادثة مغلقة</option>
                   </select>
                   {cond.kind === "STAGE" && (
                     <select
@@ -814,23 +683,103 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                       يُضبط من صفحة التكاملات: ساعات العمل
                     </p>
                   )}
+                  {cond.kind === "HAS_ASSIGNEE" && (
+                    <p className="text-xs text-muted-foreground">
+                      يتحقق إذا وُجد موظف مسند للمحادثة
+                    </p>
+                  )}
+                  {cond.kind === "STATUS_IS" && (
+                    <select
+                      value={cond.status}
+                      onChange={(e) => setCond({ status: e.target.value })}
+                      className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                    >
+                      {Object.entries(CONVERSATION_STATUS_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {cond.kind === "HOURS_BETWEEN" && (
+                    <div className="flex items-start gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">من ساعة</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={23}
+                          value={cond.from ?? 0}
+                          onChange={(e) =>
+                            setCond({
+                              from: Math.min(23, Math.max(0, Number(e.target.value) || 0)),
+                            })
+                          }
+                          className="w-20"
+                          dir="ltr"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">إلى ساعة</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={23}
+                          value={cond.to ?? 23}
+                          onChange={(e) =>
+                            setCond({
+                              to: Math.min(23, Math.max(0, Number(e.target.value) || 23)),
+                            })
+                          }
+                          className="w-20"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {cond.kind === "DAY_OF_WEEK" && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEEK_DAYS.map((d) => (
+                        <button
+                          key={d.value}
+                          type="button"
+                          onClick={() => toggleDay(d.value)}
+                          className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                            days.includes(d.value)
+                              ? "border-primary bg-accent font-medium"
+                              : "hover:bg-muted"
+                          }`}
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {cond.kind === "MESSAGE_COUNT_MIN" && (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={cond.count ?? 1}
+                        onChange={(e) =>
+                          setCond({ count: Math.max(1, Number(e.target.value) || 1) })
+                        }
+                        className="w-24"
+                        dir="ltr"
+                      />
+                      <span className="text-xs text-muted-foreground">رسالة أو أكثر</span>
+                    </div>
+                  )}
+                  {cond.kind === "IS_CLOSED" && (
+                    <p className="text-xs text-muted-foreground">
+                      يتحقق إذا كانت المحادثة مغلقة
+                    </p>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <Label>إذا تحقق الشرط (نعم)</Label>
-                  <BranchEditor
-                    branch={thenSteps}
-                    onChange={(next) => updateStep(index, { then: next })}
-                    {...options}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>وإلا (لا)</Label>
-                  <BranchEditor
-                    branch={elseSteps}
-                    onChange={(next) => updateStep(index, { else: next })}
-                    {...options}
-                  />
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  عدّل خطوات الفرعين (نعم/لا) مباشرةً على اللوحة بالنقر على الأزرار أسفل
+                  بطاقة الشرط.
+                </p>
               </div>
             );
           })()}
@@ -850,6 +799,94 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               : "يبحث الوكيل الحالي في قاعدة معرفته المربوطة"}
           </p>
         )}
+      </div>
+    );
+  }
+
+  // سلسلة خطوات عمودية داخل مسار — كل خطوة IF تفرّع لعمودين (نعم/لا) مثل n8n
+  function StepChain({ listPath }: { listPath: number[] }) {
+    const list = getListAtPath(steps, listPath);
+    return (
+      <>
+        {list.map((step, i) => {
+          const meta = stepMeta(step.type);
+          const stepPath = [...listPath, i];
+          return (
+            <div key={i} className="flex w-full flex-col items-center">
+              <div className="h-6 w-px bg-border" />
+              <div className="relative w-full">
+                <button
+                  type="button"
+                  onClick={() => setEditor({ path: stepPath, isNew: false })}
+                  className="w-full rounded-xl border-2 border-blue-400 bg-background p-4 text-start shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      الخطوة {i + 1}
+                    </span>
+                    <meta.icon className="h-4 w-4" style={{ color: meta.color }} />
+                  </div>
+                  <p className="mt-1 font-medium">{meta.label}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {stepSummary(step, members, templates, agents, dbSources)}
+                  </p>
+                  <p className="mt-2 text-xs text-blue-500">انقر للتعديل</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSteps((prev) => removeStepAtPath(prev, stepPath))}
+                  title="حذف الخطوة"
+                  className="absolute -end-2 -top-2 rounded-full border bg-background p-1 text-muted-foreground shadow-sm transition-colors hover:text-destructive"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+              {step.type === "IF" && (
+                <div className="flex w-full min-w-max flex-row items-start justify-center gap-4">
+                  <BranchColumn listPath={[...listPath, i, 0]} />
+                  <BranchColumn listPath={[...listPath, i, 1]} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  // عمود فرع (نعم/لا) تحت خطوة IF: ترويسة ملوّنة + سلسلة الخطوات + زر إضافة
+  function BranchColumn({ listPath }: { listPath: number[] }) {
+    const list = getListAtPath(steps, listPath);
+    const yes = listPath[listPath.length - 1] === 0;
+    return (
+      <div className="flex w-56 shrink-0 flex-col items-center">
+        <div className="h-4 w-px bg-border" />
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
+            yes ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+          }`}
+        >
+          {yes ? "نعم" : "لا"}
+        </span>
+        <div className="h-3 w-px bg-border" />
+        <StepChain listPath={listPath} />
+        {list.length === 0 && (
+          <>
+            <div className="h-2 w-px bg-border" />
+            <div className="w-full rounded-lg border border-dashed p-3 text-center text-[10px] text-muted-foreground">
+              لا خطوات — أضف من الزر بالأسفل
+            </div>
+          </>
+        )}
+        <div className="h-2 w-px bg-border" />
+        <button
+          type="button"
+          onClick={() => setEditor({ path: listPath, isNew: true })}
+          className="flex items-center justify-center gap-1 rounded-lg border-2 border-dashed border-muted-foreground/40 px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Plus className="h-3 w-3" />
+          إضافة خطوة
+        </button>
       </div>
     );
   }
@@ -883,7 +920,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
       </div>
 
       {/* الـ Canvas */}
-      <div className="relative flex-1 overflow-y-auto">
+      <div className="relative flex-1 overflow-auto">
         {/* خلفية منقّطة */}
         <div
           className="absolute inset-0"
@@ -892,7 +929,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             backgroundSize: "22px 22px",
           }}
         />
-        <div className="relative z-10 mx-auto flex w-80 flex-col items-center py-10">
+        <div className="relative z-10 mx-auto flex w-fit min-w-[560px] flex-col items-center py-10">
           {/* عقدة المحفّز */}
           <button
             type="button"
@@ -910,45 +947,20 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             <p className="mt-2 text-xs text-green-600">انقر للتعديل</p>
           </button>
 
-          {/* الخطوات */}
-          {steps.map((step, i) => {
-            const meta = stepMeta(step.type);
-            return (
-              <div key={i} className="flex w-full flex-col items-center">
-                <div className="h-6 w-px bg-border" />
-                <button
-                  type="button"
-                  onClick={() => setEditor(i)}
-                  className="w-full rounded-xl border-2 border-blue-400 bg-background p-4 text-start shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      الخطوة {i + 1}
-                    </span>
-                    <meta.icon className="h-4 w-4" style={{ color: meta.color }} />
-                  </div>
-                  <p className="mt-1 font-medium">{meta.label}</p>
-                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                    {stepSummary(step, members, templates, agents, dbSources)}
-                  </p>
-                  <p className="mt-2 text-xs text-blue-500">انقر للتعديل</p>
-                </button>
-              </div>
-            );
-          })}
+          {/* الخطوات — سلسلة رئيسية تتفرع مرئياً عند كل IF */}
+          <div className="h-6 w-px bg-border" />
+          <StepChain listPath={[]} />
 
           {/* إضافة خطوة */}
-          <div className="flex w-full flex-col items-center">
-            <div className="h-6 w-px bg-border" />
-            <button
-              type="button"
-              onClick={() => setEditor(-1)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-muted-foreground/40 p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة خطوة
-            </button>
-          </div>
+          <div className="h-6 w-px bg-border" />
+          <button
+            type="button"
+            onClick={() => setEditor({ path: [], isNew: true })}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-muted-foreground/40 p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          >
+            <Plus className="h-4 w-4" />
+            إضافة خطوة
+          </button>
         </div>
       </div>
 
@@ -1112,7 +1124,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             onClick={() => setEditor(null)}
           />
           <div className="fixed left-1/2 top-1/2 z-50 max-h-[80vh] w-[480px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-4 shadow-2xl">
-            {editor === -1 ? (
+            {editor.isNew ? (
               <>
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">إضافة خطوة</h3>
@@ -1126,8 +1138,8 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                       key={s.type}
                       type="button"
                       onClick={() => {
-                        setSteps([...steps, emptyStep(s.type)]);
-                        setEditor(steps.length);
+                        setSteps((prev) => addStepAtPath(prev, editor.path, emptyStep(s.type)));
+                        setEditor(null);
                       }}
                       className="flex w-full items-center gap-3 rounded-lg p-3 text-start transition-colors hover:bg-muted"
                     >
@@ -1171,14 +1183,14 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-                {stepFields(editingStep, editor)}
+                {stepFields(editingStep, editor.path)}
                 <div className="mt-4 flex items-center justify-between border-t pt-3">
                   <Button
                     variant="ghost"
                     size="sm"
                     className="text-destructive"
                     onClick={() => {
-                      setSteps(steps.filter((_, j) => j !== editor));
+                      setSteps((prev) => removeStepAtPath(prev, editor.path));
                       setEditor(null);
                     }}
                   >

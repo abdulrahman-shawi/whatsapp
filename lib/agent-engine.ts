@@ -133,6 +133,7 @@ async function runPipeline(
     contactName,
     text,
     conversationId: conversation.id,
+    vars: {},
   };
   await triggerWorkflows(workspaceId, "KEYWORD", {}, workflowCtx).catch(() => {});
   await triggerWorkflows(workspaceId, "FROM_NUMBERS", {}, workflowCtx).catch(() => {});

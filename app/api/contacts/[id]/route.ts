@@ -82,6 +82,7 @@ export async function PATCH(
         contactName: contact.name,
         text: "",
         conversationId: conversation?.id,
+        vars: {},
       }
     ).catch(() => {});
   }

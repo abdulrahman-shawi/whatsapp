@@ -241,6 +241,40 @@ async function sendMediaViaUltraMsg(
   }
 }
 
+// طلب مشاركة الموقع من العميل — رسالة تفاعلية (مزود ميتا فقط)
+export async function sendWhatsAppLocationRequest(
+  to: string,
+  prompt: string,
+  creds: WhatsAppCreds | null
+): Promise<boolean> {
+  if (!creds || creds.provider !== "meta") return false;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${creds.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to,
+          type: "interactive",
+          interactive: {
+            type: "location_request_message",
+            body: { text: prompt },
+            action: { name: "send_location" },
+          },
+        }),
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // إرسال قالب معتمد — للمراسلة خارج نافذة ٢٤ ساعة (مزود ميتا فقط)
 export async function sendWhatsAppTemplate(
   to: string,

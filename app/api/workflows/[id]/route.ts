@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { validateSteps, type WorkflowStep } from "@/lib/workflows";
 
 type Params = { params: { id: string } };
 
@@ -59,6 +60,18 @@ export async function PATCH(req: Request, { params }: Params) {
   if (body.steps !== undefined) {
     if (!Array.isArray(body.steps) || body.steps.length === 0) {
       return NextResponse.json({ error: "الخطوات غير صالحة" }, { status: 400 });
+    }
+    // التحقق من بنية الخطوات (شاملة فروع IF) مقابل أعضاء الفريق
+    const members = await prisma.workspaceMember.findMany({
+      where: { workspaceId: ctx.workspaceId },
+      select: { userId: true },
+    });
+    const stepErrors = validateSteps(
+      body.steps as WorkflowStep[],
+      members.map((m) => m.userId)
+    );
+    if (stepErrors.length > 0) {
+      return NextResponse.json({ error: stepErrors.join(" — ") }, { status: 400 });
     }
     data.steps = body.steps;
   }

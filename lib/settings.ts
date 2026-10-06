@@ -48,12 +48,34 @@ export const INTEGRATION_KEYS = [
     label: "عنقود Pusher",
     env: ["NEXT_PUBLIC_PUSHER_CLUSTER", "PUSHER_CLUSTER"],
   },
+  {
+    key: "BUSINESS_HOURS_START",
+    label: "بداية ساعات العمل (ساعة 0-23) — لشرط سير العمل",
+    env: [],
+  },
+  {
+    key: "BUSINESS_HOURS_END",
+    label: "نهاية ساعات العمل (ساعة 0-23) — لشرط سير العمل",
+    env: [],
+  },
+  {
+    key: "BUSINESS_HOURS_DAYS",
+    label: "أيام العمل (أرقام مفصولة بفواصل: 0=أحد … 6=سبت — اتركها فارغة لكل الأيام)",
+    env: [],
+  },
 ] as const;
 
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number]["key"];
 
 // مفاتيح غير سرية — تُعرض قيمتها كنص صريح في الواجهة بدل الإخفاء
-const NON_SECRET = new Set<string>(["AI_PROVIDER", "AI_MODEL", "AI_BASE_URL"]);
+const NON_SECRET = new Set<string>([
+  "AI_PROVIDER",
+  "AI_MODEL",
+  "AI_BASE_URL",
+  "BUSINESS_HOURS_START",
+  "BUSINESS_HOURS_END",
+  "BUSINESS_HOURS_DAYS",
+]);
 
 // خيارات القائمة المنسدلة للمفاتيح التي تُختار من قائمة بدل الإدخال الحر
 export const KEY_OPTIONS: Partial<
@@ -166,7 +188,7 @@ export async function getIntegrationList(
     return {
       key: def.key,
       label: def.label,
-      envName: def.env[0],
+      envName: def.env[0] ?? "",
       masked: secret && raw ? mask(raw) : null,
       value: secret ? null : raw,
       secret,

@@ -15,7 +15,7 @@ export default async function EditWorkflowPage({
   if (!ctx) redirect("/login");
   if (ctx.role !== "OWNER") redirect("/inbox");
 
-  const [workflow, members, templates] = await Promise.all([
+  const [workflow, members, templates, agents, dbSources] = await Promise.all([
     prisma.workflow.findFirst({
       where: { id: params.id, workspaceId: ctx.workspaceId },
       include: { runs: { orderBy: { createdAt: "desc" }, take: 20 } },
@@ -28,6 +28,16 @@ export default async function EditWorkflowPage({
     prisma.template.findMany({
       where: { workspaceId: ctx.workspaceId },
       select: { id: true, name: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.agent.findMany({
+      where: { workspaceId: ctx.workspaceId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.knowledgeSource.findMany({
+      where: { type: "DB", agent: { workspaceId: ctx.workspaceId } },
+      select: { id: true, title: true },
       orderBy: { createdAt: "desc" },
     }),
   ]);
@@ -51,6 +61,8 @@ export default async function EditWorkflowPage({
       }))}
       members={members.map((m) => ({ id: m.user.id, name: m.user.name }))}
       templates={templates}
+      agents={agents}
+      dbSources={dbSources}
     />
   );
 }

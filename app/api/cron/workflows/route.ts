@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
-import { resumeWaitingWorkflowRuns } from "@/lib/workflows";
+import {
+  resumeWaitingWorkflowRuns,
+  runNoReplyWorkflows,
+} from "@/lib/workflows";
 
-// استئناف خطوات سير العمل المتوقفة عند "انتظار" — كل ٥ دقائق (انظر vercel.json)
+// استئناف خطوات "انتظار" + فحص محفّز "لا رد" — كل ٥ دقائق (انظر vercel.json)
 // الحماية عبر: Authorization: Bearer ${CRON_SECRET}
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -11,5 +14,6 @@ export async function GET(req: Request) {
   }
 
   const resumed = await resumeWaitingWorkflowRuns();
-  return NextResponse.json({ resumed });
+  const noReplyFired = await runNoReplyWorkflows();
+  return NextResponse.json({ resumed, noReplyFired });
 }

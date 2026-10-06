@@ -4,7 +4,13 @@ import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { validateSteps, type WorkflowStep } from "@/lib/workflows";
 
-const TRIGGERS = ["KEYWORD", "FROM_NUMBERS", "NEW_CONTACT", "STAGE_CHANGE"] as const;
+const TRIGGERS = [
+  "KEYWORD",
+  "FROM_NUMBERS",
+  "NEW_CONTACT",
+  "STAGE_CHANGE",
+  "NO_REPLY",
+] as const;
 
 // قائمة سير العمل لمساحة العمل
 export async function GET() {
@@ -72,6 +78,16 @@ export async function POST(req: Request) {
     if (typeof tc.fromStage === "string" && tc.fromStage) {
       triggerConfig.fromStage = tc.fromStage;
     }
+  }
+  if (trigger === "NO_REPLY") {
+    const hours = Number(tc.hours);
+    if (!Number.isFinite(hours) || hours < 1 || hours > 24 * 30) {
+      return NextResponse.json(
+        { error: "مدة الصمت بين ساعة واحدة و٧٢٠ ساعة (٣٠ يوماً)" },
+        { status: 400 }
+      );
+    }
+    triggerConfig.hours = Math.round(hours);
   }
 
   // التحقق من الخطوات مقابل أعضاء الفريق الفعليين

@@ -22,6 +22,22 @@ export function ContactPanel({ contact, onSave }: Props) {
   const [name, setName] = useState(contact.name ?? "");
   const [notes, setNotes] = useState(contact.notes ?? "");
   const [tagInput, setTagInput] = useState("");
+  const [bookings, setBookings] = useState<
+    { id: string; title: string; scheduledAt: string; notes: string | null }[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/bookings?contactId=${contact.id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.bookings) setBookings(data.bookings);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [contact.id]);
 
   // مزامنة الحقول عند تبديل جهة الاتصال
   useEffect(() => {
@@ -133,13 +149,33 @@ export function ContactPanel({ contact, onSave }: Props) {
         </Button>
       </div>
 
-      {/* الحجوزات — ميزة قادمة */}
+      {/* الحجوزات */}
       <div className="space-y-2">
         <Label>الحجوزات</Label>
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center">
-          <CalendarDays className="h-6 w-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">لا توجد حجوزات بعد</p>
-        </div>
+        {bookings.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center">
+            <CalendarDays className="h-6 w-6 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">لا توجد حجوزات بعد</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {bookings.map((b) => (
+              <div key={b.id} className="rounded-lg border p-3">
+                <p className="text-sm font-medium">{b.title}</p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {new Date(b.scheduledAt).toLocaleString("ar", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                </p>
+                {b.notes && (
+                  <p className="mt-1 text-xs text-muted-foreground">{b.notes}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

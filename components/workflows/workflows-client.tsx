@@ -20,6 +20,7 @@ export const triggerLabels: Record<string, string> = {
   FROM_NUMBERS: "رسالة من أرقام محددة",
   NEW_CONTACT: "عميل جديد",
   STAGE_CHANGE: "تغيير حالة العميل",
+  NO_REPLY: "لا رد من العميل",
 };
 
 type WorkflowRow = {
@@ -47,6 +48,9 @@ function triggerSummary(w: WorkflowRow): string {
   }
   if (w.trigger === "STAGE_CHANGE") {
     return `إلى: ${String(tc.toStage ?? "")}`;
+  }
+  if (w.trigger === "NO_REPLY") {
+    return `بعد ${tc.hours ?? 24} ساعة صمت`;
   }
   return "";
 }

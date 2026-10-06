@@ -3,14 +3,23 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BookOpen,
   Bot,
+  CalendarPlus,
   CheckCheck,
   Clock,
+  CornerUpRight,
+  Database,
   Flag,
+  GitBranch,
+  Image,
   Loader2,
+  MapPin,
   Plus,
+  RotateCcw,
   Save,
   Send,
+  StickyNote,
   Tag,
   Trash2,
   UserCheck,
@@ -32,6 +41,20 @@ type Step = Record<string, unknown> & { type: string };
 
 type RunRow = { id: string; status: string; logs: string; createdAt: string };
 
+type IfCondition =
+  | { kind: "STAGE"; stage: string }
+  | { kind: "HAS_TAG"; tag: string }
+  | { kind: "TEXT_CONTAINS"; text: string }
+  | { kind: "BUSINESS_HOURS" }
+  | { kind: "DB_CONTAINS"; text: string };
+
+type OptionLists = {
+  members: { id: string; name: string }[];
+  templates: { id: string; name: string }[];
+  agents: { id: string; name: string }[];
+  dbSources: { id: string; title: string }[];
+};
+
 type Props = {
   workflow?: {
     id: string;
@@ -44,6 +67,8 @@ type Props = {
   runs?: RunRow[];
   members: { id: string; name: string }[];
   templates: { id: string; name: string }[];
+  agents: { id: string; name: string }[];
+  dbSources: { id: string; title: string }[];
 };
 
 // تعريف أنواع الخطوات: الأيقونة واللون والوصف المعروض في نافذة الإضافة
@@ -55,14 +80,25 @@ const STEP_TYPES: {
   color: string;
 }[] = [
   { type: "SEND_MESSAGE", label: "إرسال رسالة", description: "إرسال رسالة عبر آخر قناة تفاعل", icon: Send, color: "#3b82f6" },
-  { type: "ASSIGN", label: "تحديث وسم جلسة الاتصال", description: "إضافة أو إزالة وسوم على جهة الاتصال", icon: UserCheck, color: "#f59e0b" },
+  { type: "SEND_MEDIA", label: "إرسال وسائط", description: "صورة أو فيديو أو PDF برابط مباشر مع تسمية اختيارية", icon: Image, color: "#ec4899" },
+  { type: "REQUEST_LOCATION", label: "طلب الموقع", description: "طلب مشاركة موقع العميل مع نص اختياري", icon: MapPin, color: "#10b981" },
+  { type: "ASSIGN", label: "إسناد المحادثة لموظف", description: "إسناد المحادثة إلى موظف في الفريق", icon: UserCheck, color: "#f59e0b" },
+  { type: "SET_AGENT", label: "تعيين الوكيل", description: "ربط المحادثة بوكيل ذكي محدد", icon: Bot, color: "#7c3aed" },
   { type: "SET_STAGE", label: "تحديث المرحلة", description: "نقل جهة الاتصال إلى مرحلة مختلفة", icon: Flag, color: "#a855f7" },
   { type: "ADD_TAG", label: "إضافة وسم", description: "إضافة وسم جديد لجهة الاتصال", icon: Tag, color: "#14b8a6" },
+  { type: "REMOVE_TAG", label: "إزالة وسم", description: "إزالة وسم من جهة الاتصال", icon: Tag, color: "#f43f5e" },
+  { type: "ADD_NOTE", label: "إضافة ملاحظة", description: "ملاحظة داخلية على جهة الاتصال", icon: StickyNote, color: "#eab308" },
   { type: "AI_REPLY", label: "رد ذكي", description: "يرد الوكيل بمعرفته المربوطة (ملفات + نصوص + قواعد بيانات)", icon: Bot, color: "#8b5cf6" },
+  { type: "SEARCH_KNOWLEDGE", label: "البحث في المعرفة", description: "البحث في قاعدة معرفة الوكيل الحالي", icon: BookOpen, color: "#06b6d4" },
+  { type: "QUERY_DB", label: "استعلام قاعدة بيانات", description: "تشغيل استعلام على مصدر بيانات مربوط", icon: Database, color: "#f97316" },
   { type: "STOP_AI", label: "إيقاف الرد الآلي", description: "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها", icon: UserCheck, color: "#e11d48" },
+  { type: "REOPEN", label: "إعادة فتح المحادثة", description: "إعادة فتح محادثة مغلقة", icon: RotateCcw, color: "#22c55e" },
   { type: "CLOSE", label: "إغلاق المحادثة", description: "إغلاق المحادثة وإخفاءها من الوارد", icon: CheckCheck, color: "#64748b" },
-  { type: "WAIT", label: "تأخرت", description: "تأخر بناءً على ما إذا كان الوقت الحالي ضمن وردية العمل", icon: Clock, color: "#f97316" },
+  { type: "CREATE_BOOKING", label: "إنشاء حجز", description: "حجز موعد جديد مع العميل", icon: CalendarPlus, color: "#0ea5e9" },
+  { type: "WAIT", label: "انتظار (تأخير)", description: "تأخير قبل متابعة الخطوات التالية", icon: Clock, color: "#f97316" },
   { type: "WEBHOOK", label: "Webhook", description: "إرسال بيانات العميل إلى رابط خارجي", icon: Webhook, color: "#0ea5e9" },
+  { type: "GOTO", label: "الانتقال لخطوة", description: "القفز إلى خطوة أخرى في سير العمل (للأمام)", icon: CornerUpRight, color: "#6366f1" },
+  { type: "IF", label: "شرط (إذا)", description: "تفرع الخطوات حسب شرط محدد", icon: GitBranch, color: "#d946ef" },
 ];
 
 function stepMeta(type: string) {
@@ -81,23 +117,60 @@ function emptyStep(type: string): Step {
   switch (type) {
     case "SEND_MESSAGE":
       return { type, body: "" };
+    case "SEND_MEDIA":
+      return { type, url: "", caption: "" };
+    case "REQUEST_LOCATION":
+      return { type, prompt: "" };
     case "ASSIGN":
       return { type, userId: "any" };
+    case "SET_AGENT":
+      return { type, agentId: "" };
     case "SET_STAGE":
       return { type, stage: "NEW" };
     case "ADD_TAG":
+    case "REMOVE_TAG":
       return { type, tag: "" };
+    case "ADD_NOTE":
+      return { type, body: "" };
     case "WAIT":
       return { type, minutes: 30 };
     case "WEBHOOK":
       return { type, url: "" };
+    case "QUERY_DB":
+      return { type, sourceId: "" };
+    case "CREATE_BOOKING":
+      return { type, title: "", scheduledAt: "", notes: "" };
+    case "GOTO":
+      return { type, step: 1 };
+    case "IF":
+      return {
+        type,
+        condition: { kind: "STAGE", stage: "NEW" } satisfies IfCondition,
+        then: [],
+        else: [],
+      };
     default:
       return { type };
   }
 }
 
+function conditionSummary(cond: IfCondition): string {
+  switch (cond.kind) {
+    case "STAGE":
+      return `حالة العميل = ${stageConfig(cond.stage).label}`;
+    case "HAS_TAG":
+      return `يحمل الوسم "${cond.tag || "—"}"`;
+    case "TEXT_CONTAINS":
+      return `الرسالة تحتوي "${cond.text || "—"}"`;
+    case "BUSINESS_HOURS":
+      return "ضمن ساعات العمل";
+    case "DB_CONTAINS":
+      return `نتيجة قاعدة البيانات تحتوي "${cond.text || "—"}"`;
+  }
+}
+
 // ملخص الخطوة المعروض داخل بطاقة العقدة
-function stepSummary(step: Step, members: { id: string; name: string }[], templates: { id: string; name: string }[]): string {
+function stepSummary(step: Step, members: { id: string; name: string }[], templates: { id: string; name: string }[], agents: { id: string; name: string }[] = [], dbSources: { id: string; title: string }[] = []): string {
   switch (step.type) {
     case "SEND_MESSAGE": {
       const templateId = step.templateId as string | undefined;
@@ -106,29 +179,288 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
       }
       return ((step.body as string) || "بدون نص").slice(0, 60);
     }
+    case "SEND_MEDIA":
+      return (step.caption as string) || ((step.url as string) || "—").slice(0, 50);
+    case "REQUEST_LOCATION":
+      return (step.prompt as string) || "طلب الموقع من العميل";
     case "ASSIGN":
       return step.userId === "any"
         ? "أول عضو متاح في الفريق"
         : (members.find((m) => m.id === step.userId)?.name ?? "موظف محذوف");
+    case "SET_AGENT":
+      return agents.find((a) => a.id === step.agentId)?.name ?? "—";
     case "SET_STAGE":
       return `إلى: ${stageConfig((step.stage as string) ?? "NEW").label}`;
     case "ADD_TAG":
+    case "REMOVE_TAG":
       return (step.tag as string) || "—";
+    case "ADD_NOTE":
+      return ((step.body as string) || "—").slice(0, 60);
     case "AI_REPLY":
       return "يرد الوكيل بمعرفته المربوطة";
+    case "SEARCH_KNOWLEDGE":
+      return "البحث في قاعدة المعرفة";
+    case "QUERY_DB":
+      return dbSources.find((d) => d.id === step.sourceId)?.title ?? "—";
     case "CLOSE":
       return "تُغلق المحادثة وتختفي من الوارد";
+    case "REOPEN":
+      return "إعادة فتح المحادثة";
+    case "CREATE_BOOKING":
+      return (step.title as string) || "حجز جديد";
     case "WAIT":
       return `${step.minutes} دقيقة ثم تُستأنف الخطوات`;
     case "WEBHOOK":
       return ((step.url as string) || "—").slice(0, 50);
+    case "GOTO":
+      return `إلى الخطوة ${step.step ?? 1}`;
+    case "IF": {
+      const cond = (step.condition as IfCondition | undefined) ?? { kind: "STAGE", stage: "NEW" };
+      const thenSteps = Array.isArray(step.then) ? (step.then as Step[]).length : 0;
+      const elseSteps = Array.isArray(step.else) ? (step.else as Step[]).length : 0;
+      return `إذا ${conditionSummary(cond)} ← نعم:${thenSteps} لا:${elseSteps}`;
+    }
     default:
       return "";
   }
 }
 
+// محرّر فروع الخطوة IF: صف مضغوط لكل خطوة بحقول إعداد inline
+function BranchEditor({
+  branch,
+  onChange,
+  members,
+  templates,
+  agents,
+  dbSources,
+}: {
+  branch: Step[];
+  onChange: (next: Step[]) => void;
+  members: { id: string; name: string }[];
+  templates: { id: string; name: string }[];
+  agents: { id: string; name: string }[];
+  dbSources: { id: string; title: string }[];
+}) {
+  const selectCls = "w-full rounded-md border bg-background px-2 py-1.5 text-sm";
+
+  function update(i: number, patch: Partial<Step>) {
+    onChange(branch.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  }
+
+  function fields(step: Step, patch: (p: Partial<Step>) => void) {
+    switch (step.type) {
+      case "SEND_MESSAGE":
+        return (
+          <Textarea
+            value={(step.body as string) ?? ""}
+            onChange={(e) => patch({ body: e.target.value })}
+            placeholder="نص الرسالة…"
+            rows={2}
+          />
+        );
+      case "SEND_MEDIA":
+        return (
+          <>
+            <Input
+              value={(step.url as string) ?? ""}
+              onChange={(e) => patch({ url: e.target.value })}
+              placeholder="https://… (صورة/فيديو/PDF)"
+              dir="ltr"
+            />
+            <Input
+              value={(step.caption as string) ?? ""}
+              onChange={(e) => patch({ caption: e.target.value })}
+              placeholder="تسمية اختيارية"
+            />
+          </>
+        );
+      case "REQUEST_LOCATION":
+        return (
+          <Input
+            value={(step.prompt as string) ?? ""}
+            onChange={(e) => patch({ prompt: e.target.value })}
+            placeholder="نص طلب الموقع (اختياري)"
+          />
+        );
+      case "ASSIGN":
+        return (
+          <select
+            value={(step.userId as string) ?? "any"}
+            onChange={(e) => patch({ userId: e.target.value })}
+            className={selectCls}
+          >
+            <option value="any">أول عضو متاح في الفريق</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        );
+      case "SET_AGENT":
+        return (
+          <select
+            value={(step.agentId as string) ?? ""}
+            onChange={(e) => patch({ agentId: e.target.value })}
+            className={selectCls}
+          >
+            <option value="">اختر وكيلاً…</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        );
+      case "SET_STAGE":
+        return (
+          <select
+            value={(step.stage as string) ?? "NEW"}
+            onChange={(e) => patch({ stage: e.target.value })}
+            className={selectCls}
+          >
+            {CONTACT_STAGES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        );
+      case "ADD_TAG":
+      case "REMOVE_TAG":
+        return (
+          <Input
+            value={(step.tag as string) ?? ""}
+            onChange={(e) => patch({ tag: e.target.value })}
+            placeholder={step.type === "ADD_TAG" ? "وسم للإضافة" : "وسم للإزالة"}
+          />
+        );
+      case "ADD_NOTE":
+        return (
+          <Textarea
+            value={(step.body as string) ?? ""}
+            onChange={(e) => patch({ body: e.target.value })}
+            placeholder="نص الملاحظة الداخلية"
+            rows={2}
+          />
+        );
+      case "QUERY_DB":
+        return (
+          <select
+            value={(step.sourceId as string) ?? ""}
+            onChange={(e) => patch({ sourceId: e.target.value })}
+            className={selectCls}
+          >
+            <option value="">اختر مصدر بيانات…</option>
+            {dbSources.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.title}
+              </option>
+            ))}
+          </select>
+        );
+      case "WAIT":
+        return (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              value={(step.minutes as number) ?? 30}
+              onChange={(e) => patch({ minutes: Number(e.target.value) || 1 })}
+              className="w-24"
+              dir="ltr"
+            />
+            <span className="text-xs text-muted-foreground">دقيقة</span>
+          </div>
+        );
+      case "WEBHOOK":
+        return (
+          <Input
+            value={(step.url as string) ?? ""}
+            onChange={(e) => patch({ url: e.target.value })}
+            placeholder="https://example.com/hook"
+            dir="ltr"
+          />
+        );
+      case "CREATE_BOOKING":
+        return (
+          <>
+            <Input
+              value={(step.title as string) ?? ""}
+              onChange={(e) => patch({ title: e.target.value })}
+              placeholder="عنوان الحجز"
+            />
+            <Input
+              type="datetime-local"
+              value={(step.scheduledAt as string) ?? ""}
+              onChange={(e) => patch({ scheduledAt: e.target.value })}
+              dir="ltr"
+            />
+            <Textarea
+              value={(step.notes as string) ?? ""}
+              onChange={(e) => patch({ notes: e.target.value })}
+              placeholder="ملاحظات (اختياري)"
+              rows={2}
+            />
+          </>
+        );
+      default:
+        return (
+          <p className="text-xs text-muted-foreground">
+            {stepSummary(step, members, templates, agents, dbSources) || "بدون إعدادات"}
+          </p>
+        );
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {branch.map((step, i) => {
+        const meta = stepMeta(step.type);
+        return (
+          <div key={i} className="space-y-1.5 rounded-lg border bg-muted/30 p-2">
+            <div className="flex items-center gap-1.5">
+              <meta.icon className="h-3.5 w-3.5 shrink-0" style={{ color: meta.color }} />
+              <select
+                value={step.type}
+                onChange={(e) =>
+                  onChange(branch.map((s, j) => (j === i ? emptyStep(e.target.value) : s)))
+                }
+                className={selectCls}
+              >
+                {STEP_TYPES.filter((s) => s.type !== "IF" && s.type !== "GOTO").map((s) => (
+                  <option key={s.type} value={s.type}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => onChange(branch.filter((_, j) => j !== i))}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                title="حذف"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {fields(step, (p) => update(i, p))}
+          </div>
+        );
+      })}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...branch, emptyStep("SEND_MESSAGE")])}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        إضافة للفرع
+      </Button>
+    </div>
+  );
+}
+
 // محرّر سير العمل المرئي: canvas منقّط ببطاقات متصلة + نوافذ منبثقة
-export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
+export function WorkflowBuilder({ workflow, runs, members, templates, agents, dbSources }: Props) {
   const router = useRouter();
   const isEdit = Boolean(workflow);
 
@@ -145,6 +477,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
   );
   const [toStage, setToStage] = useState(
     (workflow?.triggerConfig as { toStage?: string })?.toStage ?? "NEW"
+  );
+  const [noReplyHours, setNoReplyHours] = useState<number>(
+    (workflow?.triggerConfig as { hours?: number })?.hours ?? 24
   );
   const [steps, setSteps] = useState<Step[]>(
     Array.isArray(workflow?.steps) ? (workflow!.steps as Step[]) : []
@@ -178,6 +513,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
       const from = fromStage ? stageConfig(fromStage).label : "أي حالة";
       return `${from} ← ${stageConfig(toStage).label}`;
     }
+    if (trigger === "NO_REPLY") return `بعد ${noReplyHours} ساعة من صمت العميل`;
     return "أول رسالة من عميل جديد";
   }
 
@@ -191,7 +527,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
           ? { phones }
           : trigger === "STAGE_CHANGE"
             ? { toStage, ...(fromStage ? { fromStage } : {}) }
-            : {};
+            : trigger === "NO_REPLY"
+              ? { hours: noReplyHours }
+              : {};
 
     const payload = { name, trigger, triggerConfig, steps };
     const res = await fetch(
@@ -299,6 +637,203 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
             dir="ltr"
           />
         )}
+        {step.type === "SEND_MEDIA" && (
+          <>
+            <Input
+              value={(step.url as string) ?? ""}
+              onChange={(e) => updateStep(index, { url: e.target.value })}
+              placeholder="https://… (رابط مباشر لصورة/فيديو/PDF)"
+              dir="ltr"
+            />
+            <Input
+              value={(step.caption as string) ?? ""}
+              onChange={(e) => updateStep(index, { caption: e.target.value })}
+              placeholder="تسمية اختيارية للوسائط"
+            />
+          </>
+        )}
+        {step.type === "REQUEST_LOCATION" && (
+          <Input
+            value={(step.prompt as string) ?? ""}
+            onChange={(e) => updateStep(index, { prompt: e.target.value })}
+            placeholder="نص يطلب فيه موقع العميل (اختياري)"
+          />
+        )}
+        {step.type === "SET_AGENT" && (
+          <select
+            value={(step.agentId as string) ?? ""}
+            onChange={(e) => updateStep(index, { agentId: e.target.value })}
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">اختر وكيلاً…</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {step.type === "REMOVE_TAG" && (
+          <Input
+            value={(step.tag as string) ?? ""}
+            onChange={(e) => updateStep(index, { tag: e.target.value })}
+            placeholder="مثال: متابعة"
+          />
+        )}
+        {step.type === "ADD_NOTE" && (
+          <Textarea
+            value={(step.body as string) ?? ""}
+            onChange={(e) => updateStep(index, { body: e.target.value })}
+            placeholder="ملاحظة داخلية عن العميل…"
+            rows={3}
+          />
+        )}
+        {step.type === "QUERY_DB" && (
+          <select
+            value={(step.sourceId as string) ?? ""}
+            onChange={(e) => updateStep(index, { sourceId: e.target.value })}
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">اختر مصدر بيانات…</option>
+            {dbSources.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.title}
+              </option>
+            ))}
+          </select>
+        )}
+        {step.type === "CREATE_BOOKING" && (
+          <>
+            <Input
+              value={(step.title as string) ?? ""}
+              onChange={(e) => updateStep(index, { title: e.target.value })}
+              placeholder="عنوان الحجز"
+            />
+            <Input
+              type="datetime-local"
+              value={(step.scheduledAt as string) ?? ""}
+              onChange={(e) => updateStep(index, { scheduledAt: e.target.value })}
+              dir="ltr"
+            />
+            <Textarea
+              value={(step.notes as string) ?? ""}
+              onChange={(e) => updateStep(index, { notes: e.target.value })}
+              placeholder="ملاحظات (اختياري)"
+              rows={2}
+            />
+          </>
+        )}
+        {step.type === "GOTO" && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              value={(step.step as number) ?? 1}
+              onChange={(e) =>
+                updateStep(index, { step: Math.max(1, Number(e.target.value) || 1) })
+              }
+              className="w-28"
+              dir="ltr"
+            />
+            <span className="text-sm text-muted-foreground">رقم الخطوة (1-based، للأمام)</span>
+          </div>
+        )}
+        {step.type === "IF" &&
+          (() => {
+            const cond = (step.condition as IfCondition | undefined) ?? {
+              kind: "STAGE",
+              stage: "NEW",
+            };
+            const thenSteps = Array.isArray(step.then) ? (step.then as Step[]) : [];
+            const elseSteps = Array.isArray(step.else) ? (step.else as Step[]) : [];
+            const setCond = (patch: Partial<IfCondition>) =>
+              updateStep(index, { condition: { ...cond, ...patch } });
+            const options = {
+              members,
+              templates,
+              agents,
+              dbSources,
+            };
+            return (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>نوع الشرط</Label>
+                  <select
+                    value={cond.kind}
+                    onChange={(e) => {
+                      const kind = e.target.value as IfCondition["kind"];
+                      const base: IfCondition =
+                        kind === "STAGE"
+                          ? { kind: "STAGE", stage: "NEW" }
+                          : kind === "BUSINESS_HOURS"
+                            ? { kind: "BUSINESS_HOURS" }
+                            : kind === "HAS_TAG"
+                              ? { kind: "HAS_TAG", tag: "" }
+                              : kind === "TEXT_CONTAINS"
+                                ? { kind: "TEXT_CONTAINS", text: "" }
+                                : { kind: "DB_CONTAINS", text: "" };
+                      updateStep(index, { condition: base });
+                    }}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                  >
+                    <option value="STAGE">حالة العميل</option>
+                    <option value="HAS_TAG">يحمل الوسم</option>
+                    <option value="TEXT_CONTAINS">الرسالة تحتوي</option>
+                    <option value="BUSINESS_HOURS">ضمن ساعات العمل</option>
+                    <option value="DB_CONTAINS">نتيجة قاعدة البيانات تحتوي</option>
+                  </select>
+                  {cond.kind === "STAGE" && (
+                    <select
+                      value={cond.stage}
+                      onChange={(e) => setCond({ stage: e.target.value })}
+                      className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                    >
+                      {CONTACT_STAGES.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {cond.kind === "HAS_TAG" && (
+                    <Input
+                      value={cond.tag}
+                      onChange={(e) => setCond({ tag: e.target.value })}
+                      placeholder="الوسم المطلوب"
+                    />
+                  )}
+                  {(cond.kind === "TEXT_CONTAINS" || cond.kind === "DB_CONTAINS") && (
+                    <Input
+                      value={cond.text}
+                      onChange={(e) => setCond({ text: e.target.value })}
+                      placeholder="النص المطلوب"
+                    />
+                  )}
+                  {cond.kind === "BUSINESS_HOURS" && (
+                    <p className="text-xs text-muted-foreground">
+                      يُضبط من صفحة التكاملات: ساعات العمل
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label>إذا تحقق الشرط (نعم)</Label>
+                  <BranchEditor
+                    branch={thenSteps}
+                    onChange={(next) => updateStep(index, { then: next })}
+                    {...options}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>وإلا (لا)</Label>
+                  <BranchEditor
+                    branch={elseSteps}
+                    onChange={(next) => updateStep(index, { else: next })}
+                    {...options}
+                  />
+                </div>
+              </div>
+            );
+          })()}
         {(step.type === "AI_REPLY" || step.type === "CLOSE" || step.type === "STOP_AI") && (
           <p className="text-xs text-muted-foreground">
             {step.type === "AI_REPLY"
@@ -306,6 +841,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
               : step.type === "STOP_AI"
                 ? "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها"
                 : "تُغلق المحادثة وتختفي من الوارد"}
+          </p>
+        )}
+        {(step.type === "REOPEN" || step.type === "SEARCH_KNOWLEDGE") && (
+          <p className="text-xs text-muted-foreground">
+            {step.type === "REOPEN"
+              ? "إعادة فتح المحادثة وإرجاعها للوارد"
+              : "يبحث الوكيل الحالي في قاعدة معرفته المربوطة"}
           </p>
         )}
       </div>
@@ -387,7 +929,7 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
                   </div>
                   <p className="mt-1 font-medium">{meta.label}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                    {stepSummary(step, members, templates)}
+                    {stepSummary(step, members, templates, agents, dbSources)}
                   </p>
                   <p className="mt-2 text-xs text-blue-500">انقر للتعديل</p>
                 </button>
@@ -528,6 +1070,28 @@ export function WorkflowBuilder({ workflow, runs, members, templates }: Props) {
                       ))}
                     </select>
                   </div>
+                </div>
+              )}
+
+              {trigger === "NO_REPLY" && (
+                <div className="space-y-2">
+                  <Label>مدة الصمت قبل التشغيل (بالساعات)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={noReplyHours}
+                    onChange={(e) =>
+                      setNoReplyHours(
+                        Math.min(720, Math.max(1, Number(e.target.value) || 24))
+                      )
+                    }
+                    className="w-28"
+                    dir="ltr"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    يُشغَّل سير العمل إذا لم يردّ العميل خلال هذه المدة
+                  </p>
                 </div>
               )}
             </div>

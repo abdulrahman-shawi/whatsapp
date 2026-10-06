@@ -79,6 +79,8 @@ export async function getWorkspaceConversations(
     assignees: c.assignees.map((a) => a.user),
     closedAt: c.closedAt ? c.closedAt.toISOString() : null,
     followUpAt: c.followUpAt ? c.followUpAt.toISOString() : null,
+    tags: c.tags,
+    notes: c.notes,
     lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),
     contact: c.contact,
     lastMessage: c.messages[0]

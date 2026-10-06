@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Archive, BellRing, CalendarClock, CheckCheck, Inbox as InboxIcon, Search, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,21 @@ export function ConversationList({
   onQueryChange,
   searching,
 }: Props) {
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Ctrl+K (أو Cmd+K) في أي مكان بالصفحة ينقل التركيز لحقل البحث
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
@@ -106,9 +122,10 @@ export function ConversationList({
         <div className="relative">
           <Search className="pointer-events-none absolute start-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="بحث في المحادثات والرسائل…"
+            placeholder="بحث في المحادثات والرسائل… (Ctrl+K)"
             className="w-full rounded-md border bg-background py-1.5 ps-8 pe-7 text-sm"
           />
           {query && (

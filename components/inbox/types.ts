@@ -30,6 +30,9 @@ export type ConversationListItem = {
   closedAt: string | null;
   // موعد المتابعة القادم لهذه المحادثة (إن وُجد)
   followUpAt: string | null;
+  // وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
+  tags: string[];
+  notes: string | null;
   lastMessageAt: string;
   contact: ContactInfo;
   lastMessage: {

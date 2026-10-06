@@ -243,6 +243,8 @@ model Conversation {
   messages      Message[]
   scheduledMessages ScheduledMessage[]
   followUpAt    DateTime? // موعد متابعة المحادثة — يظهر في قائمة "متابعات" بالوارد
+  tags          String[]  @default([]) // وسوم على مستوى المحادثة (مستقلة عن وسوم جهة الاتصال)
+  notes         String?   @db.Text // ملاحظات داخلية على مستوى المحادثة
 }
 
 // إسناد محادثة لموظف — نفس المحادثة قد تُسند لأكثر من شخص

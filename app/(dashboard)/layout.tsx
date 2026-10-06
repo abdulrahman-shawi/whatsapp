@@ -6,6 +6,7 @@ import { getWorkspaceContext } from "@/lib/session";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { LogoutButton } from "@/components/logout-button";
+import { RemindersBell } from "@/components/reminders-bell";
 
 // هيكل لوحة التحكم: يتطلب جلسة، ويعرض شريطاً جانبياً (يمين في RTL)
 export default async function DashboardLayout({
@@ -45,7 +46,12 @@ export default async function DashboardLayout({
           <LogoutButton />
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-6">{children}</main>
+      <main className="min-w-0 flex-1 p-6">
+        <div className="mb-4 flex items-center justify-end">
+          <RemindersBell />
+        </div>
+        {children}
+      </main>
     </div>
   );
 }

@@ -22,6 +22,8 @@ export async function PATCH(
     status?: (typeof STATUSES)[number];
     isArchived?: boolean;
     closedAt?: Date | null;
+    tags?: string[];
+    notes?: string | null;
   } = {};
   // مصفوفة المسند إليهم الجديدة — تُعالج بعد تحديث المحادثة في معاملة مستقلة
   let assigneeIds: string[] | null = null;
@@ -63,6 +65,19 @@ export async function PATCH(
       return NextResponse.json({ error: "قيمة الإغلاق غير صالحة" }, { status: 400 });
     }
     data.closedAt = body.closed ? new Date() : null;
+  }
+  // وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
+  if (body.tags !== undefined) {
+    if (!Array.isArray(body.tags) || (body.tags as unknown[]).some((t) => typeof t !== "string" || (t as string).length > 40)) {
+      return NextResponse.json({ error: "قائمة الوسوم غير صالحة (٤٠ حرفاً كحد أقصى للوسم)" }, { status: 400 });
+    }
+    data.tags = [...new Set((body.tags as string[]).map((t) => t.trim()).filter(Boolean))].slice(0, 20);
+  }
+  if (body.notes !== undefined) {
+    if (body.notes !== null && typeof body.notes !== "string") {
+      return NextResponse.json({ error: "الملاحظة غير صالحة" }, { status: 400 });
+    }
+    data.notes = body.notes?.trim() ? body.notes.trim() : null;
   }
   if (Object.keys(data).length === 0 && assigneeIds === null) {
     return NextResponse.json({ error: "لا يوجد ما يُحدَّث" }, { status: 400 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, Plus, X } from "lucide-react";
+import { CalendarDays, MessagesSquare, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,13 +15,18 @@ type Props = {
   onSave: (
     patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes" | "stage">>
   ) => void;
+  // بطاقة المحادثة: وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
+  conversation?: { id: string; tags: string[]; notes: string | null } | null;
+  onSaveConversation?: (patch: { tags?: string[]; notes?: string | null }) => void;
 };
 
-// لوحة جهة الاتصال (العمود الأيسر): الاسم، الوسوم، الملاحظات، الحجوزات
-export function ContactPanel({ contact, onSave }: Props) {
+// لوحة جهة الاتصال (العمود الأيسر): بطاقة المحادثة، الاسم، الوسوم، الملاحظات، الحجوزات
+export function ContactPanel({ contact, onSave, conversation, onSaveConversation }: Props) {
   const [name, setName] = useState(contact.name ?? "");
   const [notes, setNotes] = useState(contact.notes ?? "");
   const [tagInput, setTagInput] = useState("");
+  const [convTagInput, setConvTagInput] = useState("");
+  const [convNotes, setConvNotes] = useState(conversation?.notes ?? "");
   const [bookings, setBookings] = useState<
     { id: string; title: string; scheduledAt: string; notes: string | null }[]
   >([]);
@@ -39,12 +44,14 @@ export function ContactPanel({ contact, onSave }: Props) {
     };
   }, [contact.id]);
 
-  // مزامنة الحقول عند تبديل جهة الاتصال
+  // مزامنة الحقول عند تبديل جهة الاتصال أو المحادثة
   useEffect(() => {
     setName(contact.name ?? "");
     setNotes(contact.notes ?? "");
     setTagInput("");
-  }, [contact.id, contact.name, contact.notes]);
+    setConvTagInput("");
+    setConvNotes(conversation?.notes ?? "");
+  }, [contact.id, contact.name, contact.notes, conversation?.id, conversation?.notes]);
 
   function addTag() {
     const tag = tagInput.trim();
@@ -53,8 +60,80 @@ export function ContactPanel({ contact, onSave }: Props) {
     setTagInput("");
   }
 
+  function addConvTag() {
+    const tag = convTagInput.trim();
+    if (!tag || !conversation || conversation.tags.includes(tag)) return;
+    onSaveConversation?.({ tags: [...conversation.tags, tag] });
+    setConvTagInput("");
+  }
+
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto p-4">
+      {/* بطاقة المحادثة: وسوم وملاحظات تخص هذه المحادثة وحدها */}
+      {conversation && onSaveConversation && (
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <MessagesSquare className="h-3.5 w-3.5" />
+            بطاقة المحادثة
+          </Label>
+          <div className="flex flex-wrap gap-1.5">
+            {conversation.tags.length === 0 && (
+              <span className="text-xs text-muted-foreground">بلا وسوم</span>
+            )}
+            {conversation.tags.map((tag) => (
+              <Badge key={tag} variant="outline" className="gap-1">
+                {tag}
+                <button
+                  onClick={() =>
+                    onSaveConversation({
+                      tags: conversation.tags.filter((t) => t !== tag),
+                    })
+                  }
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex gap-1.5">
+            <Input
+              value={convTagInput}
+              onChange={(e) => setConvTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addConvTag();
+              }}
+              placeholder="وسم للمحادثة…"
+              className="h-7 text-xs"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2"
+              onClick={addConvTag}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+          <Textarea
+            value={convNotes}
+            onChange={(e) => setConvNotes(e.target.value)}
+            placeholder="ملاحظة داخلية على هذه المحادثة…"
+            rows={2}
+            className="text-xs"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => onSaveConversation({ notes: convNotes })}
+            disabled={convNotes.trim() === (conversation.notes ?? "")}
+          >
+            حفظ ملاحظة المحادثة
+          </Button>
+        </div>
+      )}
+
       {/* الاسم */}
       <div className="space-y-2">
         <Label htmlFor="contact-name">الاسم</Label>

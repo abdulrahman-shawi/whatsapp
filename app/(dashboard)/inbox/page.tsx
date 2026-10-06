@@ -8,7 +8,12 @@ import { InboxClient } from "@/components/inbox/inbox-client";
 export const dynamic = "force-dynamic";
 
 // صندوق الوارد: جلب أولي من الخادم ثم يدير العميل الاستطلاع
-export default async function InboxPage() {
+// ‎?c=<id> يفتح محادثة محددة مباشرة (تستخدمه روابط إشعارات المتابعات)
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: { c?: string };
+}) {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
 
@@ -22,11 +27,13 @@ export default async function InboxPage() {
   ]);
 
   const members = memberships.map((m) => m.user);
+  const initialSelectedId = searchParams.c ?? null;
   return (
     <InboxClient
       initialConversations={conversations}
       members={members}
       currentUserId={ctx.userId}
+      initialSelectedId={initialSelectedId}
     />
   );
 }

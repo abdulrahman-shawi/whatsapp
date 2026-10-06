@@ -150,6 +150,49 @@ export function ChatWindow({
   const isManual = conversation.status === "MANUAL";
   const isClosed = conversation.closedAt !== null;
 
+  // اختصار "/": كتابته أول الحقل تفتح قائمة الردود الجاهزة المطابقة
+  const slashQuery = text.startsWith("/") && !text.slice(1).includes(" ")
+    ? text.slice(1).toLowerCase()
+    : null;
+  const slashMatches =
+    slashQuery !== null
+      ? canned
+          .filter((c) => c.shortcut.toLowerCase().includes(slashQuery))
+          .slice(0, 6)
+      : [];
+
+  // خيارات متابعة سريعة: "ذكّرني بها بعد ساعتين"
+  const toLocalInput = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const followUpPresets: { label: string; date: () => Date }[] = [
+    { label: "بعد ساعة", date: () => new Date(Date.now() + 60 * 60 * 1000) },
+    { label: "بعد ساعتين", date: () => new Date(Date.now() + 2 * 60 * 60 * 1000) },
+    {
+      label: "غداً ٩ ص",
+      date: () => {
+        const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        d.setHours(9, 0, 0, 0);
+        return d;
+      },
+    },
+  ];
+
+  // ضبط موعد متابعة مباشرة (للخيارات السريعة)
+  async function handleQuickFollowUp(date: Date) {
+    const res = await fetch(`/api/conversations/${conversation.id}/followup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ followUpAt: date.toISOString() }),
+    });
+    if (res.ok) {
+      setFollowUpAt(date.toISOString());
+      setFollowUpOpen(false);
+      onFollowUpChanged?.();
+    }
+  }
+
   // متغيرات القالب المحدد: {{1}} {{2}}... مرتبة رقمياً
   const templateVars: number[] = selectedTemplate
     ? [
@@ -228,6 +271,11 @@ export function ChatWindow({
     }
     const typed = text.trim();
     if (!typed) return;
+    // قائمة الاختصار "/": الإدخال يختار أول مطابقة بدل الإرسال
+    if (slashMatches.length > 0) {
+      handleInsertCanned(slashMatches[0]);
+      return;
+    }
     // الردود الجاهزة: نص مكوّن من اختصار مسجّل فقط يُستبدل بالنص الكامل
     const cannedMatch = canned.find((c) => c.shortcut === typed);
     onSend(cannedMatch ? cannedMatch.body : typed, isNoteMode);
@@ -483,6 +531,20 @@ export function ChatWindow({
                   <p className="mb-1 text-xs text-muted-foreground">
                     موعد المتابعة القادم
                   </p>
+                  {/* خيارات سريعة: ذكّرني بها بعد ساعتين */}
+                  <div className="mb-2 flex gap-1">
+                    {followUpPresets.map((preset) => (
+                      <Button
+                        key={preset.label}
+                        size="sm"
+                        variant="outline"
+                        className="h-7 flex-1 text-xs"
+                        onClick={() => handleQuickFollowUp(preset.date())}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
                   <input
                     type="datetime-local"
                     value={followUpDraft}
@@ -756,7 +818,7 @@ export function ChatWindow({
       )}
 
       {/* حقل الإرسال */}
-      <div className="flex items-center gap-2 border-t p-3">
+      <div className="relative flex items-center gap-2 border-t p-3">
         <input
           ref={fileInputRef}
           type="file"
@@ -956,10 +1018,29 @@ export function ChatWindow({
               ? "اكتب ملاحظة داخلية — لن تُرسل للعميل…"
               : pendingFile
                 ? `📎 ${pendingFile.name} — أضف تعليقاً…`
-                : "اكتب رسالة…"
+                : "اكتب رسالة… (ابدأ بـ / للردود الجاهزة)"
           }
           className={cn("flex-1", isNoteMode && "border-amber-400 bg-amber-50")}
         />
+        {/* قائمة الردود الجاهزة عند كتابة / في أول الحقل */}
+        {slashMatches.length > 0 && (
+          <div className="absolute bottom-full start-10 z-20 mb-1 w-80 rounded-md border bg-background p-1 shadow-lg">
+            {slashMatches.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => handleInsertCanned(c)}
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm hover:bg-muted"
+              >
+                <Badge variant="outline" className="shrink-0">
+                  /{c.shortcut}
+                </Badge>
+                <span className="line-clamp-1 text-xs text-muted-foreground">
+                  {c.body}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <Button
           size="icon"
           onClick={handleSend}

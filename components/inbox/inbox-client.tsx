@@ -21,6 +21,8 @@ type Props = {
   initialConversations: ConversationListItem[];
   members: MemberInfo[];
   currentUserId: string;
+  // فتح محادثة محددة عند التحميل (من رابط إشعار متابعة ?c=)
+  initialSelectedId?: string | null;
 };
 
 // العميل الرئيسي لصندوق الوارد: يدير الحالة والاستطلاع الدوري
@@ -28,12 +30,13 @@ export function InboxClient({
   initialConversations,
   members,
   currentUserId,
+  initialSelectedId = null,
 }: Props) {
   const [conversations, setConversations] =
     useState<ConversationListItem[]>(initialConversations);
   const [view, setView] = useState<ListView>("open");
   const [filter, setFilter] = useState<AssignmentFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   // البحث الشامل: نتائج /api/search — null تعني "لا بحث نشط"
@@ -348,6 +351,24 @@ export function InboxClient({
     }
   }
 
+  // حفظ وسوم/ملاحظات المحادثة وتحديث الحالة المحلية
+  async function handleUpdateConversation(patch: {
+    tags?: string[];
+    notes?: string | null;
+  }) {
+    if (!selected) return;
+    const res = await fetch(`/api/conversations/${selected.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selected.id ? { ...c, ...patch } : c))
+      );
+    }
+  }
+
   return (
     <div className="flex h-[calc(100vh-3rem)] overflow-hidden rounded-xl border bg-card">
       {/* قائمة المحادثات — تظهر يميناً في RTL */}
@@ -402,6 +423,12 @@ export function InboxClient({
           <ContactPanel
             contact={selected.contact}
             onSave={handleUpdateContact}
+            conversation={{
+              id: selected.id,
+              tags: selected.tags,
+              notes: selected.notes,
+            }}
+            onSaveConversation={handleUpdateConversation}
           />
         </div>
       )}

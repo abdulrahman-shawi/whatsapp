@@ -20,6 +20,36 @@ export function IntegrationsForm({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  // نتيجة اختبار مفتاح الذكاء الاصطناعي (لحقل OPENAI_API_KEY فقط)
+  const [testingAi, setTestingAi] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  // اختبار المفتاح المحفوظ حالياً (قاعدة البيانات أو .env) بتوليد قصير
+  async function handleTestAi() {
+    setTestingAi(true);
+    setAiTestResult(null);
+    try {
+      const res = await fetch("/api/settings/test-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // نختبر ما كُتب في الحقل (حتى قبل الحفظ) — والمحفوظ إن كان فارغاً
+        body: JSON.stringify({ apiKey: draft.OPENAI_API_KEY ?? "" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        setAiTestResult({ ok: true, text: `✅ يعمل — ${data.model}: ${data.message}` });
+      } else {
+        setAiTestResult({ ok: false, text: `❌ ${data?.error ?? "تعذّر الاختبار"}` });
+      }
+    } catch {
+      setAiTestResult({ ok: false, text: "❌ تعذّر الاتصال بالخادم" });
+    } finally {
+      setTestingAi(false);
+    }
+  }
 
   const sourceBadge = (source: IntegrationInfo["source"]) =>
     source === "db" ? (
@@ -148,6 +178,33 @@ export function IntegrationsForm({
               </Button>
             )}
           </div>
+          {/* زر اختبار مفتاح الذكاء الاصطناعي + نتيجته */}
+          {item.key === "OPENAI_API_KEY" && (
+            <div className="mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTestAi}
+                disabled={testingAi}
+              >
+                {testingAi ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                اختبار المفتاح الحالي
+              </Button>
+              {aiTestResult && (
+                <p
+                  className={`mt-1 text-xs ${aiTestResult.ok ? "text-emerald-600" : "text-destructive"}`}
+                  role="alert"
+                >
+                  {aiTestResult.text}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       ))}
 

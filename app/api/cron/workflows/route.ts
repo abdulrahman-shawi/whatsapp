@@ -1,0 +1,15 @@
+import { NextResponse } from "next/server";
+import { resumeWaitingWorkflowRuns } from "@/lib/workflows";
+
+// استئناف خطوات سير العمل المتوقفة عند "انتظار" — كل ٥ دقائق (انظر vercel.json)
+// الحماية عبر: Authorization: Bearer ${CRON_SECRET}
+export async function GET(req: Request) {
+  const secret = process.env.CRON_SECRET;
+  const auth = req.headers.get("authorization");
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  }
+
+  const resumed = await resumeWaitingWorkflowRuns();
+  return NextResponse.json({ resumed });
+}

@@ -68,6 +68,14 @@ enum BroadcastStatus {
   FAILED
 }
 
+// محفّز سير العمل التلقائي
+enum WorkflowTrigger {
+  KEYWORD // رسالة واردة تحتوي كلمة مفتاحية
+  FROM_NUMBERS // رسالة واردة من أرقام محددة
+  NEW_CONTACT // أول رسالة من عميل جديد
+  STAGE_CHANGE // تغيير حالة العميل في مسار البيع
+}
+
 // المستخدم: حساب الدخول للمنصة
 model User {
   id           String            @id @default(cuid())
@@ -77,6 +85,7 @@ model User {
   createdAt    DateTime          @default(now())
   memberships  WorkspaceMember[]
   conversationAssignees ConversationAssignee[] // المحادثات المسندة إليه
+  workflows    Workflow[] // سير العمل التي أنشأها
   sentMessages  Message[] // الرسائل (الملاحظات الداخلية) التي أرسلها
 }
 
@@ -94,6 +103,7 @@ model Workspace {
   templates  Template[]
   invites    WorkspaceInvite[]
   broadcasts BroadcastCampaign[]
+  workflows  Workflow[]
   planId     String?
   plan       Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
 }
@@ -280,6 +290,39 @@ model Setting {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, key])
+}
+
+// سير عمل تلقائي: محفّز + شروط + خطوات متسلسلة تُنفَّذ دون تدخل بشري
+// triggerConfig و steps تُخزَّنان كـ JSON لمرونة تطوير أنواع جديدة دون هجرات
+model Workflow {
+  id            String          @id @default(cuid())
+  workspaceId   String
+  name          String
+  trigger       WorkflowTrigger
+  triggerConfig Json            @default("{}")
+  // مثال خطوات: [{ "type": "SEND_MESSAGE", "body": "أهلاً {{name}}" }, { "type": "WAIT", "minutes": 30 }]
+  steps         Json            @default("[]")
+  isActive      Boolean         @default(true)
+  createdById   String?
+  createdBy     User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs          WorkflowRun[]
+}
+
+// سجل تشغيل واحد لسير عمل: نتيجة الخطوات + سجل نصي لتتبع الأعطال
+model WorkflowRun {
+  id             String       @id @default(cuid())
+  workflowId     String
+  conversationId String?
+  status         String // SUCCESS | FAILED | WAITING
+  // خطوات متبقية عند التوقف عند خطوة انتظار — يستأنفها الكرون عند حلول الوقت
+  pendingSteps   Json?
+  resumeAt       DateTime?
+  logs           String       @db.Text @default("")
+  createdAt      DateTime     @default(now())
+  workflow       Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 }
 
 // قالب رسالة واتساب معتمد في ميتا — يُرسل خارج نافذة ٢٤ ساعة

@@ -5,6 +5,7 @@ import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
+import { triggerWorkflows } from "@/lib/workflows";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -56,12 +57,19 @@ async function runPipeline(
 }> {
   const { workspaceId, agent, waPhone, contactName, text, platform } = opts;
 
-  // ٢. إيجاد أو إنشاء جهة الاتصال
-  const contact = await prisma.contact.upsert({
-    where: { workspaceId_waPhone: { workspaceId, waPhone } },
-    update: contactName ? { name: contactName } : {},
-    create: { workspaceId, waPhone, name: contactName },
+  // ٢. إيجاد أو إنشاء جهة الاتصال — مع كشف العملاء الجدد لمحفّز سير العمل
+  const existingContact = await prisma.contact.findFirst({
+    where: { workspaceId, waPhone },
   });
+  const contact = existingContact
+    ? await prisma.contact.update({
+        where: { id: existingContact.id },
+        data: contactName ? { name: contactName } : {},
+      })
+    : await prisma.contact.create({
+        data: { workspaceId, waPhone, name: contactName },
+      });
+  const isNewContact = !existingContact;
 
   // ٣. إيجاد محادثة مفتوحة أو إنشاء واحدة جديدة
   let conversation = opts.conversationId
@@ -115,6 +123,21 @@ async function runPipeline(
 
   // ٥. عدّ الاستهلاك الشهري
   await incrementUsage(workspaceId);
+
+  // ٥.ب مطابقة سير العمل: كلمات مفتاحية / أرقام محددة / عميل جديد
+  const workflowCtx = {
+    workspaceId,
+    contactId: contact.id,
+    waPhone,
+    contactName,
+    text,
+    conversationId: conversation.id,
+  };
+  triggerWorkflows(workspaceId, "KEYWORD", {}, workflowCtx).catch(() => {});
+  triggerWorkflows(workspaceId, "FROM_NUMBERS", {}, workflowCtx).catch(() => {});
+  if (isNewContact) {
+    triggerWorkflows(workspaceId, "NEW_CONTACT", {}, workflowCtx).catch(() => {});
+  }
 
   // ٦. كلمات التسليم: تحويل المحادثة لموظف دون رد آلي
   const normalized = normalize(text);

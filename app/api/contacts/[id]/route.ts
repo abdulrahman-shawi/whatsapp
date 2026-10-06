@@ -3,6 +3,7 @@ import type { ContactStage } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isContactStage } from "@/lib/contact-stages";
+import { triggerWorkflows } from "@/lib/workflows";
 
 // تحديث بيانات جهة الاتصال: الاسم، الوسوم، الملاحظات
 export async function PATCH(
@@ -63,5 +64,27 @@ export async function PATCH(
     data,
     select: { id: true, name: true, waPhone: true, tags: true, notes: true, stage: true },
   });
+
+  // محفّز سير العمل: تغيير حالة العميل في مسار البيع
+  if (data.stage && existing.stage !== data.stage) {
+    const conversation = await prisma.conversation.findFirst({
+      where: { contactId: contact.id, isArchived: false, closedAt: null },
+      orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } },
+    });
+    triggerWorkflows(
+      ctx.workspaceId,
+      "STAGE_CHANGE",
+      { fromStage: existing.stage, toStage: data.stage },
+      {
+        workspaceId: ctx.workspaceId,
+        contactId: contact.id,
+        waPhone: contact.waPhone,
+        contactName: contact.name,
+        text: "",
+        conversationId: conversation?.id,
+      }
+    ).catch(() => {});
+  }
+
   return NextResponse.json({ contact });
 }

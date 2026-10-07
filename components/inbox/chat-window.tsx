@@ -462,17 +462,17 @@ export function ChatWindow({
 
   return (
     <div className="flex h-full flex-col">
-      {/* ترويسة المحادثة */}
-      <div className="flex items-center justify-between gap-2 border-b p-3">
-        <div>
-          <p className="font-medium">
+      {/* ترويسة المحادثة — تلتف أزرارها لسطر ثانٍ عند ضيق المساحة */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
+        <div className="min-w-0">
+          <p className="truncate font-medium">
             {conversation.contact.name ?? conversation.contact.waPhone}
           </p>
           <p className="text-xs text-muted-foreground" dir="ltr">
             {conversation.contact.waPhone}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {/* إسناد المحادثة لأعضاء الفريق — تحديد متعدد من قائمة منسدلة */}
           <div className="relative">
             <Button
@@ -725,7 +725,7 @@ export function ChatWindow({
       {/* منطقة الرسائل */}
       <div
         ref={scrollRef}
-        className="flex flex-1 flex-col gap-2 overflow-y-auto bg-muted/30 p-4"
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-muted/30 p-4"
       >
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
@@ -938,8 +938,8 @@ export function ChatWindow({
         </div>
       )}
 
-      {/* حقل الإرسال */}
-      <div className="relative flex items-center gap-2 border-t p-3">
+      {/* حقل الإرسال — يلتف عند ضيق المساحة */}
+      <div className="relative flex flex-wrap items-center gap-2 border-t p-3">
         <input
           ref={fileInputRef}
           type="file"

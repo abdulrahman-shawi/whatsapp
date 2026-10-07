@@ -392,7 +392,7 @@ export function InboxClient({
       </div>
 
       {/* نافذة المحادثة */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {selected ? (
           <ChatWindow
             conversation={selected}

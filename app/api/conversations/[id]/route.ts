@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { triggerConversationUpdated } from "@/lib/pusher";
+import { logAudit } from "@/lib/audit";
+import { notifyUser } from "@/lib/notify";
 
 const STATUSES = ["AI", "MANUAL", "HANDED_OFF"] as const;
 
@@ -131,6 +133,73 @@ export async function PATCH(
           ]
         : []),
     ]);
+    const assigneeNames = (
+      await prisma.user.findMany({
+        where: { id: { in: assigneeIds } },
+        select: { name: true },
+      })
+    ).map((u) => u.name ?? "");
+    await logAudit({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "ASSIGN",
+      entity: "conversation",
+      entityId: params.id,
+      meta: {
+        assignees: assigneeNames,
+        contact: conversation.contactId,
+      },
+    });
+    // إشعار كل مسند إليه (داخلي + Push) — مع اسم جهة الاتصال إن وُجد
+    if (assigneeIds.length > 0) {
+      const contact = await prisma.contact.findUnique({
+        where: { id: conversation.contactId },
+        select: { name: true, waPhone: true },
+      });
+      const contactLabel = contact?.name ?? contact?.waPhone ?? "";
+      for (const userId of assigneeIds) {
+        notifyUser({
+          workspaceId: ctx.workspaceId,
+          userId,
+          type: "ASSIGNED",
+          title: "محادثة مُسندة إليك",
+          body: contactLabel
+            ? `محادثة مع ${contactLabel}`
+            : "أُسندت إليك محادثة جديدة",
+          link: `/inbox?c=${params.id}`,
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // تدقيق الإغلاق/إعادة الفتح والأرشفة
+  if (body.closed === true && !existing.closedAt) {
+    await logAudit({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "CLOSE",
+      entity: "conversation",
+      entityId: params.id,
+    });
+  }
+  if (body.closed === false && existing.closedAt) {
+    await logAudit({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "REOPEN",
+      entity: "conversation",
+      entityId: params.id,
+    });
+  }
+  if (body.isArchived !== undefined && body.isArchived !== existing.isArchived) {
+    await logAudit({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "UPDATE",
+      entity: "conversation",
+      entityId: params.id,
+      meta: { archived: body.isArchived },
+    });
   }
 
   // إشعار باقي الفريق فوراً بتحديث المحادثة (إسناد/إغلاق/...) — أفضل-جهد

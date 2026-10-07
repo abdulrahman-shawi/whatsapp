@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 
 type Params = { params: { userId: string } };
 
@@ -34,6 +35,15 @@ export async function PATCH(req: Request, { params }: Params) {
   await prisma.workspaceMember.update({
     where: { userId_workspaceId: { userId: params.userId, workspaceId: ctx.workspaceId } },
     data: { role },
+  });
+  // تدقيق تغيير الدور
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "UPDATE",
+    entity: "member",
+    entityId: params.userId,
+    meta: { role },
   });
   return NextResponse.json({ ok: true });
 }
@@ -69,5 +79,13 @@ export async function DELETE(_req: Request, { params }: Params) {
     where: { userId_workspaceId: { userId: params.userId, workspaceId: ctx.workspaceId } },
   });
   // محادثاته المسندة إليه تُلغى إسنادها تلقائياً (onDelete: SetNull)
+  // تدقيق إزالة العضو
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "DELETE",
+    entity: "member",
+    entityId: params.userId,
+  });
   return NextResponse.json({ ok: true });
 }

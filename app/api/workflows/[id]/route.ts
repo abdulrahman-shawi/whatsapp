@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { validateSteps, type WorkflowStep } from "@/lib/workflows";
+import { logAudit } from "@/lib/audit";
 
 type Params = { params: { id: string } };
 
@@ -84,6 +85,15 @@ export async function PATCH(req: Request, { params }: Params) {
     where: { id: params.id },
     data,
   });
+  // تدقيق تعديل سير العمل (تفعيل/إيقاف أو محتوى)
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "UPDATE",
+    entity: "workflow",
+    entityId: params.id,
+    meta: { name: workflow.name, changed: Object.keys(data) },
+  });
   return NextResponse.json({ workflow });
 }
 
@@ -103,5 +113,14 @@ export async function DELETE(_req: Request, { params }: Params) {
   }
 
   await prisma.workflow.delete({ where: { id: params.id } });
+  // تدقيق حذف سير العمل
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "DELETE",
+    entity: "workflow",
+    entityId: params.id,
+    meta: { name: existing.name },
+  });
   return NextResponse.json({ ok: true });
 }

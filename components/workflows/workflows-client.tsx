@@ -3,7 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2, Workflow as WorkflowIcon } from "lucide-react";
+import {
+  Download,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  Workflow as WorkflowIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,15 +20,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ImportWorkflowPanel } from "@/components/workflows/import-workflow-panel";
+import { TemplatesGallery } from "@/components/workflows/templates-gallery";
+import { downloadWorkflowExport, triggerLabels } from "@/components/workflows/workflow-io";
 
-// مسميات المحفّزات المعروضة
-export const triggerLabels: Record<string, string> = {
-  KEYWORD: "رسالة بكلمة مفتاحية",
-  FROM_NUMBERS: "رسالة من أرقام محددة",
-  NEW_CONTACT: "عميل جديد",
-  STAGE_CHANGE: "تغيير حالة العميل",
-  NO_REPLY: "لا رد من العميل",
-};
+export { triggerLabels };
 
 type WorkflowRow = {
   id: string;
@@ -79,6 +82,7 @@ function triggerSummary(w: WorkflowRow): string {
 export function WorkflowsClient({ workflows }: Props) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   async function toggleActive(w: WorkflowRow) {
     setBusyId(w.id);
@@ -108,13 +112,25 @@ export function WorkflowsClient({ workflows }: Props) {
             أتمتة تلقائية: محفّز يشغّل خطوات متسلسلة دون تدخل بشري
           </p>
         </div>
-        <Button asChild>
-          <Link href="/workflows/new">
-            <Plus className="h-4 w-4" />
-            إنشاء سير عمل
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setImportOpen(!importOpen)}>
+            <Upload className="h-4 w-4" />
+            استيراد
+          </Button>
+          <Button asChild>
+            <Link href="/workflows/new">
+              <Plus className="h-4 w-4" />
+              إنشاء سير عمل
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      <TemplatesGallery />
+
+      {importOpen && (
+        <ImportWorkflowPanel open={importOpen} onClose={() => setImportOpen(false)} />
+      )}
 
       {workflows.length === 0 ? (
         <Card>
@@ -198,6 +214,21 @@ export function WorkflowsClient({ workflows }: Props) {
                           <Link href={`/workflows/${w.id}`}>
                             <Pencil className="h-4 w-4" />
                           </Link>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="تصدير"
+                          onClick={() =>
+                            downloadWorkflowExport({
+                              name: w.name,
+                              trigger: w.trigger,
+                              triggerConfig: w.triggerConfig,
+                              steps: w.steps,
+                            })
+                          }
+                        >
+                          <Download className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"

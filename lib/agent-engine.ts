@@ -7,8 +7,41 @@ import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
 import { triggerWorkflows } from "@/lib/workflows";
 import { detectLanguage, detectSentiment, LANGUAGE_NAMES } from "@/lib/sentiment";
+import { notifyUser } from "@/lib/notify";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
+
+// إشعار من سُندت إليهم المحادثة برسالة واردة جديدة (داخلي + Push)
+// مفصول عن خط المعالجة تماماً: أي خطأ هنا لا يوقف الويب هوك
+async function notifyInboundAssignees(
+  workspaceId: string,
+  conversationId: string,
+  fromLabel: string,
+  text: string
+): Promise<void> {
+  try {
+    const assignees = await prisma.conversationAssignee.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+    if (assignees.length === 0) return;
+    const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+    await Promise.all(
+      assignees.map((a) =>
+        notifyUser({
+          workspaceId,
+          userId: a.userId,
+          type: "MESSAGE",
+          title: `رسالة جديدة من ${fromLabel}`,
+          body: preview,
+          link: `/inbox?c=${conversationId}`,
+        })
+      )
+    );
+  } catch (e) {
+    console.error("[agent-engine] تعذّر إشعار المسند إليهم:", e);
+  }
+}
 
 // مفتاح الشهر الحالي لسجل الاستهلاك، مثل "2025-01"
 function currentMonth(): string {
@@ -137,6 +170,14 @@ async function runPipeline(
   // بث فوري لصندوق الوارد — لا يؤثر على شيء إن لم يكن Pusher مفعّلاً
   triggerNewMessage(workspaceId, conversation.id, inboundMsg);
   triggerConversationUpdated(workspaceId, conversation.id);
+
+  // إشعار المسند إليهم بالرسالة الواردة — بلا انتظار حتى لا يبطئ الخط
+  void notifyInboundAssignees(
+    workspaceId,
+    conversation.id,
+    contactName ?? waPhone,
+    text
+  );
 
   // ٥. عدّ الاستهلاك الشهري
   await incrementUsage(workspaceId);

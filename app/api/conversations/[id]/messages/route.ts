@@ -7,6 +7,7 @@ import {
   sendWhatsAppTemplate,
 } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { getStaffRestrictionFilter } from "@/lib/conversations";
 
 type Params = { params: { id: string } };
 
@@ -53,6 +54,22 @@ export async function GET(req: Request, { params }: Params) {
   });
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
+  }
+
+  // قيود الموظف: عند تفعيل التقييد لا يرى الموظف سوى محادثاته المسندة إليه
+  const restrictToUserId = await getStaffRestrictionFilter(
+    ctx.workspaceId,
+    ctx.role,
+    ctx.userId
+  );
+  if (restrictToUserId) {
+    const assigned = await prisma.conversationAssignee.findFirst({
+      where: { conversationId: params.id, userId: restrictToUserId },
+      select: { conversationId: true },
+    });
+    if (!assigned) {
+      return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
+    }
   }
 
   const sinceParam = new URL(req.url).searchParams.get("since");

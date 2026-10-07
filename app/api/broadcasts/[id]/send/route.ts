@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { sendBroadcast } from "@/lib/broadcast";
+import { logAudit } from "@/lib/audit";
 
 // إرسال حملة مجدولة فوراً: يبدّلها من QUEUED إلى الإرسال المباشر
 // (زر "إرسال الآن" في واجهة الحملات)
@@ -34,6 +35,15 @@ export async function POST(
     data: { scheduledAt: null },
   });
   await sendBroadcast(campaign.id);
+
+  // تدقيق الإرسال الفوري لحملة مجدولة
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "SEND",
+    entity: "broadcast",
+    entityId: campaign.id,
+  });
 
   const updated = await prisma.broadcastCampaign.findUnique({
     where: { id: campaign.id },

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { dateTime } from "@/lib/time";
+import { notifyMembers } from "@/lib/notify";
 
 // GET: حجوزات مساحة العمل ضمن نطاق زمني — ?contactId= يحصرها لعميل واحد (لوحة جهة الاتصال)
 // ‎?from= &to= (ISO) للتقويم الشهري — الافتراضي: من الشهر الحالي ±شهر
@@ -76,5 +78,14 @@ export async function POST(req: Request) {
       notes: body.notes?.trim() || null,
     },
   });
+  // إشعار الفريق بالحجز الجديد (داخلي + Push) — باستثناء من أنشأه
+  notifyMembers({
+    workspaceId: ctx.workspaceId,
+    excludeUserId: ctx.userId,
+    type: "BOOKING",
+    title: "حجز جديد",
+    body: `${title} — ${contact.name ?? waPhone} بموعد ${dateTime(scheduledAt)}`,
+    link: "/bookings",
+  }).catch(() => {});
   return NextResponse.json({ booking }, { status: 201 });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Crown, Loader2, Rocket } from "lucide-react";
+import { Check, CreditCard, Crown, Loader2, Rocket } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -20,23 +20,27 @@ type PlanItem = {
 
 type Usage = { used: number; limit: number; remaining: number; percent: number };
 
-// صفحة الاشتراك: الباقة الحالية، شبكة الباقات، ولوحة مدير المنصة للتفعيل اليدوي
+// صفحة الاشتراك: الباقة الحالية، شبكة الباقات، والاشتراك الآلي أو التفعيل اليدوي
 export function BillingClient({
   currentPlan,
   plans,
   usage,
   isAdmin,
   supportWhatsapp,
+  stripeConfigured,
 }: {
   currentPlan: PlanItem;
   plans: PlanItem[];
   usage: Usage;
   isAdmin: boolean;
   supportWhatsapp: string;
+  stripeConfigured: boolean;
 }) {
   const [adminPlan, setAdminPlan] = useState(currentPlan.code);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [subscribing, setSubscribing] = useState<string | null>(null);
+  const [subscribeError, setSubscribeError] = useState("");
 
   const barColor =
     usage.percent >= 95
@@ -67,6 +71,24 @@ export function BillingClient({
       return;
     }
     setMessage("تم تعيين الباقة — حدّث الصفحة لرؤية التغيير");
+  }
+
+  // الاشتراك الآلي عبر Stripe Checkout: إنشاء جلسة ثم تحويل المتصفح إليها
+  async function handleSubscribe(planCode: string) {
+    setSubscribing(planCode);
+    setSubscribeError("");
+    const res = await fetch("/api/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ planCode }),
+    });
+    const data = await res.json().catch(() => null);
+    setSubscribing(null);
+    if (!res.ok || !data?.url) {
+      setSubscribeError(data?.error ?? "حدث خطأ أثناء تجهيز الدفع");
+      return;
+    }
+    window.location.href = data.url;
   }
 
   return (
@@ -135,7 +157,21 @@ export function BillingClient({
                 <li>حتى {p.maxAgents} وكلاء ذكيين</li>
                 <li>ردود الفريق اليدوية غير محدودة</li>
               </ul>
-              {!isCurrent && upgradeHref && (
+              {!isCurrent && stripeConfigured && (
+                <Button
+                  className="mt-4"
+                  onClick={() => handleSubscribe(p.code)}
+                  disabled={subscribing !== null}
+                >
+                  {subscribing === p.code ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CreditCard className="h-4 w-4" />
+                  )}
+                  اشترك الآن
+                </Button>
+              )}
+              {!isCurrent && !stripeConfigured && upgradeHref && (
                 <Button className="mt-4" variant="outline" asChild>
                   <a href={upgradeHref} target="_blank" rel="noreferrer">
                     <Rocket className="h-4 w-4" />
@@ -148,7 +184,17 @@ export function BillingClient({
         })}
       </div>
 
-      {!upgradeHref && (
+      {subscribeError && (
+        <p className="text-sm text-red-600">{subscribeError}</p>
+      )}
+
+      {!stripeConfigured && (
+        <p className="text-xs text-muted-foreground">
+          الدفع الآلي غير مضبوط — التفعيل يدوي حالياً
+        </p>
+      )}
+
+      {!upgradeHref && !stripeConfigured && (
         <p className="text-xs text-muted-foreground">
           لطلب الترقية تواصل مع مالك المنصة — لضبط رابط واتساب التواصل أضف
           NEXT_PUBLIC_SUPPORT_WHATSAPP في ملف .env

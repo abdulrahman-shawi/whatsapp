@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 
 // تسلسل الوكيل للعميل مع عدّاداته
 function serialize(a: {
@@ -91,6 +92,16 @@ export async function POST(req: Request) {
     include: {
       _count: { select: { knowledgeSources: true, conversations: true } },
     },
+  });
+
+  // تدقيق إنشاء الوكيل
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "CREATE",
+    entity: "agent",
+    entityId: agent.id,
+    meta: { name: agent.name },
   });
 
   return NextResponse.json({ agent: serialize(agent) }, { status: 201 });

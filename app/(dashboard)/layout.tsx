@@ -7,6 +7,8 @@ import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { LogoutButton } from "@/components/logout-button";
 import { RemindersBell } from "@/components/reminders-bell";
+import { NotificationBell } from "@/components/notifications/notification-bell";
+import { PwaSetup } from "@/components/pwa/pwa-setup";
 
 // هيكل لوحة التحكم: يتطلب جلسة، ويعرض شريطاً جانبياً (يمين في RTL)
 export default async function DashboardLayout({
@@ -47,11 +49,13 @@ export default async function DashboardLayout({
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-6">
-        <div className="mb-4 flex items-center justify-end">
+        <div className="mb-4 flex items-center justify-end gap-1">
           <RemindersBell />
+          <NotificationBell />
         </div>
         {children}
       </main>
+      <PwaSetup />
     </div>
   );
 }

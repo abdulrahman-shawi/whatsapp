@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseLeadFormBody } from "@/lib/lead-forms";
+import { logAudit } from "@/lib/audit";
 
 type Params = { params: { id: string } };
 
@@ -16,7 +17,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const existing = await prisma.leadForm.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },
-    select: { id: true },
+    select: { id: true, name: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "النموذج غير موجود" }, { status: 404 });
@@ -43,6 +44,19 @@ export async function PATCH(req: Request, { params }: Params) {
     where: { id: params.id },
     data,
   });
+  // تدقيق التعديل: أسماء الحقول المتغيّرة وقيمة التفعيل إن وُجدت
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "UPDATE",
+    entity: "form",
+    entityId: params.id,
+    meta: {
+      name: existing.name,
+      changed: Object.keys(data),
+      isActive: parsed.isActive,
+    },
+  });
   return NextResponse.json({ form });
 }
 
@@ -56,12 +70,21 @@ export async function DELETE(_req: Request, { params }: Params) {
 
   const existing = await prisma.leadForm.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },
-    select: { id: true },
+    select: { id: true, name: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "النموذج غير موجود" }, { status: 404 });
   }
 
   await prisma.leadForm.delete({ where: { id: params.id } });
+  // تدقيق حذف النموذج
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "DELETE",
+    entity: "form",
+    entityId: params.id,
+    meta: { name: existing.name },
+  });
   return NextResponse.json({ ok: true });
 }

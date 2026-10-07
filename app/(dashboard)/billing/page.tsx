@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { PartyPopper, XCircle } from "lucide-react";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
@@ -6,6 +8,7 @@ import {
   getUsageStatus,
   getWorkspacePlan,
 } from "@/lib/billing/plans";
+import { stripeConfigured } from "@/lib/stripe";
 import { BillingClient } from "@/components/billing/billing-client";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +22,11 @@ function adminEmails(): string[] {
 }
 
 // صفحة الاشتراك: الباقة الحالية والباقات المتاحة وطلب الترقية
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: { success?: string; canceled?: string };
+}) {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
   if (ctx.role !== "OWNER") redirect("/inbox");
@@ -40,17 +47,42 @@ export default async function BillingPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">الاشتراك والباقات</h1>
-        <p className="text-sm text-muted-foreground">
-          باقتك الحالية وحدودها، والباقات المتاحة للترقية
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-bold">الاشتراك والباقات</h1>
+            <p className="text-sm text-muted-foreground">
+              باقتك الحالية وحدودها، والباقات المتاحة للترقية
+            </p>
+          </div>
+          <Link
+            href="/invoices"
+            className="text-sm text-primary underline-offset-4 hover:underline"
+          >
+            عرض الفواتير
+          </Link>
+        </div>
       </div>
+
+      {searchParams.success === "1" && (
+        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          <PartyPopper className="h-4 w-4 shrink-0" />
+          تم تفعيل باقتك بنجاح 🎉
+        </div>
+      )}
+      {searchParams.canceled === "1" && (
+        <div className="flex items-center gap-2 rounded-lg border border-muted bg-accent/40 px-4 py-3 text-sm text-muted-foreground">
+          <XCircle className="h-4 w-4 shrink-0" />
+          تم إلغاء إتمام الدفع
+        </div>
+      )}
+
       <BillingClient
         currentPlan={currentPlan}
         plans={plans}
         usage={usage}
         isAdmin={isAdmin}
         supportWhatsapp={process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP ?? ""}
+        stripeConfigured={stripeConfigured()}
       />
     </div>
   );

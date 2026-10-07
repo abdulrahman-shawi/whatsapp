@@ -110,6 +110,7 @@ model Workspace {
   cannedResponses CannedResponse[]
   scheduledMessages ScheduledMessage[]
   leadForms   LeadForm[]
+  restrictStaff Boolean @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
   planId     String?
   plan       Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
 }
@@ -160,6 +161,71 @@ model BroadcastClick {
   campaign   BroadcastCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, contactId])
+}
+
+// إشعار داخلي لعضو الفريق — userId فارغ يعني لكل الأعضاء
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String? // مستلم محدد — null للفريق كله
+  type        String // ASSIGNED | BOOKING | MESSAGE | SYSTEM
+  title       String
+  body        String    @db.Text
+  link        String? // مسار داخلي مثل /inbox?c=<id>
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, userId, createdAt])
+}
+
+// سجل التدقيق: من فعل ماذا ومتى — يُعلَّق اسم المستخدم لأنه قد يُحذف
+model AuditLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String?
+  userName    String?
+  action      String // ASSIGN | CLOSE | REOPEN | DELETE | UPDATE | CREATE | SEND
+  entity      String // conversation | workflow | broadcast | member | setting | form | agent | webhook
+  entityId    String?
+  meta        Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+// فاتورة اشتراك — تُنشأ من ويب هوك Stripe عند نجاح الدفع
+model Invoice {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  planId          String?
+  amount          Int // بالسنت
+  currency        String    @default("usd")
+  status          String // PAID | PENDING | FAILED
+  stripeSessionId String?   @unique
+  stripeInvoiceId String?
+  createdAt       DateTime  @default(now())
+}
+
+// ويب هوك وارد: رابط خارجي (متجر/نظام) يرسل أحداثاً تفتح محادثة وتشغّل سير عمل
+model InboundWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  token       String    @unique
+  workflowId  String? // سير عمل يُشغَّل عند كل استقبال
+  autoTag     String    @default("") // وسم يُلصق بجهة الاتصال المولَّدة
+  isActive    Boolean   @default(true)
+  lastHitAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// اشتراك Push لمتصفح مستخدم — إشعارات PWA
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  keys      Json // ‏{p256dh, auth}
+  createdAt DateTime @default(now())
 }
 
 // دعوة انضمام لمرة واحدة: ينشئها المالك ويرسل الرابط للموظف

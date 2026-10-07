@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 
 type Params = { params: { id: string } };
 
@@ -87,6 +88,15 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const agent = await prisma.agent.update({ where: { id: params.id }, data });
+  // تدقيق تحديث الوكيل
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "UPDATE",
+    entity: "agent",
+    entityId: params.id,
+    meta: { name: agent.name, changed: Object.keys(data) },
+  });
   return NextResponse.json({ agent });
 }
 
@@ -106,5 +116,14 @@ export async function DELETE(_req: Request, { params }: Params) {
   }
 
   await prisma.agent.delete({ where: { id: params.id } });
+  // تدقيق حذف الوكيل
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "DELETE",
+    entity: "agent",
+    entityId: params.id,
+    meta: { name: existing.name },
+  });
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getIntegrationList, isIntegrationKey } from "@/lib/settings";
+import { logAudit } from "@/lib/audit";
 
 // قائمة مفاتيح التكامل مقنّعة مع مصدر كل منها
 export async function GET() {
@@ -47,6 +48,23 @@ export async function PUT(req: Request) {
       });
     }
   }
+
+  // تدقيق: أي مزوّد لُمست حقوله (بوجود/عدم فقط — لا قيماً ولا أسراراً)
+  const touched = new Set<string>();
+  for (const key of Object.keys(body)) {
+    if (key.startsWith("ULTRAMSG")) touched.add("ultramsg");
+    else if (key.startsWith("OPENAI") || key.startsWith("AI_")) touched.add("openai");
+    else if (key.startsWith("WHATSAPP") || key.startsWith("META")) touched.add("whatsapp");
+    else if (key.startsWith("PUSHER")) touched.add("pusher");
+    else touched.add("other");
+  }
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "UPDATE",
+    entity: "setting",
+    meta: Object.fromEntries([...touched].map((p) => [p, true])),
+  });
 
   const integrations = await getIntegrationList(ctx.workspaceId);
   return NextResponse.json({ integrations });

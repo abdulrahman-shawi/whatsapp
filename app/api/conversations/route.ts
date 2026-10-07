@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import {
   getWorkspaceConversations,
+  getStaffRestrictionFilter,
   type AssignmentFilter,
 } from "@/lib/conversations";
 
@@ -22,12 +23,19 @@ export async function GET(req: Request) {
     ? (filterParam as AssignmentFilter)
     : "all";
 
+  const restrictToUserId = await getStaffRestrictionFilter(
+    ctx.workspaceId,
+    ctx.role,
+    ctx.userId
+  );
+
   const conversations = await getWorkspaceConversations(ctx.workspaceId, {
     archived,
     closed,
     followups,
     filter,
     userId: ctx.userId,
+    restrictToUserId,
   });
   return NextResponse.json({ conversations });
 }

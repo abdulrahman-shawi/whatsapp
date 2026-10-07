@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { validateSteps, type WorkflowStep } from "@/lib/workflows";
+import { logAudit } from "@/lib/audit";
 
 const TRIGGERS = [
   "KEYWORD",
@@ -109,6 +110,15 @@ export async function POST(req: Request) {
       steps: steps as Prisma.InputJsonValue,
       createdById: ctx.userId,
     },
+  });
+  // تدقيق إنشاء سير العمل
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "CREATE",
+    entity: "workflow",
+    entityId: workflow.id,
+    meta: { name, trigger },
   });
   return NextResponse.json({ workflow }, { status: 201 });
 }

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 
 // إنشاء دعوة انضمام لمرة واحدة — مالك مساحة العمل فقط
 export async function POST(req: Request) {
@@ -23,6 +24,16 @@ export async function POST(req: Request) {
       workspaceId: ctx.workspaceId,
       role,
     },
+  });
+
+  // تدقيق إنشاء الدعوة (دور فقط — بدون التوكن)
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "CREATE",
+    entity: "member",
+    entityId: invite.id,
+    meta: { role },
   });
 
   const url = `${new URL(req.url).origin}/register?invite=${invite.token}`;

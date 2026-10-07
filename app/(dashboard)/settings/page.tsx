@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { IntegrationsForm } from "@/components/settings/integrations-form";
 import { TemplatesForm } from "@/components/settings/templates-form";
 import { MembersForm } from "@/components/settings/members-form";
+import { StaffPermissionsCard } from "@/components/settings/staff-permissions-card";
 
 export const dynamic = "force-dynamic";
 
@@ -18,22 +19,27 @@ export default async function SettingsPage() {
   if (ctx.role !== "OWNER") redirect("/inbox");
 
   // القيم المقنّعة فقط — لا تصل الأسرار الخام إلى المتصفح أبداً
-  const [integrations, templates, memberships, invites] = await Promise.all([
-    getIntegrationList(ctx.workspaceId),
-    prisma.template.findMany({
-      where: { workspaceId: ctx.workspaceId },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.workspaceMember.findMany({
-      where: { workspaceId: ctx.workspaceId },
-      include: { user: { select: { id: true, name: true, email: true } } },
-      orderBy: { user: { name: "asc" } },
-    }),
-    prisma.workspaceInvite.findMany({
-      where: { workspaceId: ctx.workspaceId },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+  const [integrations, templates, memberships, invites, workspace] =
+    await Promise.all([
+      getIntegrationList(ctx.workspaceId),
+      prisma.template.findMany({
+        where: { workspaceId: ctx.workspaceId },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.workspaceMember.findMany({
+        where: { workspaceId: ctx.workspaceId },
+        include: { user: { select: { id: true, name: true, email: true } } },
+        orderBy: { user: { name: "asc" } },
+      }),
+      prisma.workspaceInvite.findMany({
+        where: { workspaceId: ctx.workspaceId },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.workspace.findUnique({
+        where: { id: ctx.workspaceId },
+        select: { restrictStaff: true },
+      }),
+    ]);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -89,6 +95,8 @@ export default async function SettingsPage() {
           myRole={ctx.role}
         />
       </div>
+
+      <StaffPermissionsCard initialRestricted={workspace?.restrictStaff ?? false} />
 
       {/* قوالب رسائل واتساب المعتمدة */}
       <div>

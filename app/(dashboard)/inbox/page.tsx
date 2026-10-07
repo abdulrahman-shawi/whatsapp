@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
-import { getWorkspaceConversations } from "@/lib/conversations";
+import {
+  getWorkspaceConversations,
+  getStaffRestrictionFilter,
+} from "@/lib/conversations";
 import { prisma } from "@/lib/prisma";
 import { InboxClient } from "@/components/inbox/inbox-client";
 
@@ -18,7 +21,10 @@ export default async function InboxPage({
   if (!ctx) redirect("/login");
 
   const [conversations, memberships] = await Promise.all([
-    getWorkspaceConversations(ctx.workspaceId),
+    getStaffRestrictionFilter(ctx.workspaceId, ctx.role, ctx.userId).then(
+      (restrictToUserId) =>
+        getWorkspaceConversations(ctx.workspaceId, { restrictToUserId })
+    ),
     prisma.workspaceMember.findMany({
       where: { workspaceId: ctx.workspaceId },
       include: { user: { select: { id: true, name: true } } },

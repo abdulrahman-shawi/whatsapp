@@ -11,7 +11,23 @@ type ListOptions = {
   followups?: boolean; // عرض محادثات لها موعد متابعة (الأقرب موعداً أولاً)
   filter?: AssignmentFilter;
   userId?: string; // مطلوب عند filter=mine
+  restrictToUserId?: string; // قيود وصول الموظف: يرى محادثاته المسندة إليه فقط
 };
+
+// فلتر قيود الموظف: يُطبَّق فقط عندما يكون دوره STAFF ومساحة العمل مقيدة
+// يعيد userId للتقييد أو undefined (المالك أو مساحة غير مقيدة = لا تقييد)
+export async function getStaffRestrictionFilter(
+  workspaceId: string,
+  role: string,
+  userId: string
+): Promise<string | undefined> {
+  if (role !== "STAFF") return undefined;
+  const ws = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { restrictStaff: true },
+  });
+  return ws?.restrictStaff ? userId : undefined;
+}
 
 // جلب محادثات مساحة العمل مع جهة الاتصال وآخر رسالة وعدد غير المقروء
 // الوارد الافتراضي: المفتوحة (غير المغلقة) وغير المؤرشفة
@@ -19,7 +35,7 @@ export async function getWorkspaceConversations(
   workspaceId: string,
   options: ListOptions = {}
 ) {
-  const { archived = false, closed = false, followups = false, filter = "all", userId } = options;
+  const { archived = false, closed = false, followups = false, filter = "all", userId, restrictToUserId } = options;
 
   const where = {
     workspaceId,
@@ -30,11 +46,14 @@ export async function getWorkspaceConversations(
         : closed
           ? { isArchived: false, closedAt: { not: null } }
           : { isArchived: false, closedAt: null }),
-    ...(filter === "mine" && userId
-      ? { assignees: { some: { userId } } }
-      : filter === "unassigned"
-        ? { assignees: { none: {} } }
-        : {}),
+    // قيود الموظف تتقدّم على أي فلتر إسناد آخر — كل الحالات تُقيَّد بمحادثاته
+    ...(restrictToUserId
+      ? { assignees: { some: { userId: restrictToUserId } } }
+      : filter === "mine" && userId
+        ? { assignees: { some: { userId } } }
+        : filter === "unassigned"
+          ? { assignees: { none: {} } }
+          : {}),
   };
 
   const conversations = await prisma.conversation.findMany({

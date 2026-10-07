@@ -9,6 +9,7 @@ import {
   sendBroadcast,
   type BroadcastAudience,
 } from "@/lib/broadcast";
+import { logAudit } from "@/lib/audit";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
@@ -202,6 +203,24 @@ export async function POST(req: Request) {
       params,
       totalCount: contacts.length,
       createdById: ctx.userId,
+    },
+  });
+
+  // تدقيق إنشاء الحملة بملخص الاستهداف (بدون محتوى الرسالة)
+  void logAudit({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "CREATE",
+    entity: "broadcast",
+    entityId: campaign.id,
+    meta: {
+      audience: {
+        tags: audience.tags,
+        stage: audience.stage,
+        inactiveDays: audience.inactiveDays,
+      },
+      recipients: contacts.length,
+      scheduled: Boolean(scheduledAt),
     },
   });
 

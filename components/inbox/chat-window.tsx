@@ -9,11 +9,14 @@ import {
   CheckCheck,
   Clock,
   FileText,
+  ListCollapse,
   Loader2,
   Paperclip,
   Send,
   Sparkles,
   StickyNote,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   User,
   X,
@@ -99,6 +102,12 @@ export function ChatWindow({
   );
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpDraft, setFollowUpDraft] = useState("");
+  // تقييم ردود الذكاء الاصطناعي (تدريب الوكيل) — يُحقن "الجيد" في البرومبت
+  const [ratings, setRatings] = useState<Record<string, string | null>>({});
+  // ملخص المحادثة بالذكاء الاصطناعي للموظف المتسلم
+  const [summary, setSummary] = useState<string | null>(conversation.summary);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   // منتقي القوالب
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -124,6 +133,9 @@ export function ChatWindow({
     setFollowUpOpen(false);
     setFollowUpAt(conversation.followUpAt);
     setFollowUpDraft("");
+    setRatings({});
+    setSummary(conversation.summary);
+    setSummaryOpen(false);
     let cancelled = false;
     fetch("/api/canned-responses")
       .then((r) => (r.ok ? r.json() : null))
@@ -190,6 +202,37 @@ export function ChatWindow({
       setFollowUpAt(date.toISOString());
       setFollowUpOpen(false);
       onFollowUpChanged?.();
+    }
+  }
+
+  // تقييم رد ذكاء اصطناعي: يُحفظ ويُحقن "الجيد" منه في برومبت الوكيل مستقبلاً
+  async function handleRate(messageId: string, value: "GOOD" | "NEEDS_IMPROVEMENT") {
+    await fetch(`/api/conversations/${conversation.id}/rate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId, rating: value }),
+    });
+    setRatings((prev) => ({ ...prev, [messageId]: value }));
+  }
+
+  // تلخيص المحادثة بالذكاء الاصطناعي للموظف الجديد المتسلم
+  async function handleSummarize(force = false) {
+    setSummaryOpen(true);
+    if (summary && !force) return;
+    setSummaryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/conversations/${conversation.id}/summary${force ? "?force=true" : ""}`,
+        { method: "POST" }
+      );
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.summary) {
+        setSummary(data.summary);
+      } else {
+        alert(data?.error ?? "تعذّر تلخيص المحادثة");
+      }
+    } finally {
+      setSummaryLoading(false);
     }
   }
 
@@ -579,6 +622,21 @@ export function ChatWindow({
             )}
           </div>
 
+          {/* تلخيص المحادثة بالذكاء — للموظف الجديد المتسلم */}
+          <Button
+            variant={summaryOpen ? "secondary" : "ghost"}
+            size="sm"
+            title="ملخص المحادثة بالذكاء الاصطناعي"
+            onClick={() => (summaryOpen ? setSummaryOpen(false) : handleSummarize())}
+          >
+            {summaryLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ListCollapse className="h-4 w-4" />
+            )}
+            ملخص
+          </Button>
+
           {/* إغلاق / إعادة فتح المحادثة */}
           <Button
             variant={isClosed ? "secondary" : "ghost"}
@@ -625,6 +683,42 @@ export function ChatWindow({
       {isClosed && (
         <div className="border-b bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-700">
           محادثة مغلقة — رسالة العميل الجديدة ستلغي الإغلاق وتعيدها للوارد
+        </div>
+      )}
+
+      {/* ملخص المحادثة المولّد بالذكاء الاصطناعي */}
+      {summaryOpen && (
+        <div className="border-b bg-violet-50 px-4 py-2">
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-xs font-medium text-violet-700">
+              ملخص المحادثة — للموظف المتسلم
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                className="text-xs text-violet-600 hover:underline"
+                onClick={() => handleSummarize(true)}
+                disabled={summaryLoading}
+              >
+                تحديث الملخص
+              </button>
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => setSummaryOpen(false)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          {summaryLoading ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              يجري تلخيص المحادثة…
+            </p>
+          ) : (
+            <p className="whitespace-pre-wrap text-sm text-violet-900">
+              {summary ?? "لا ملخص بعد — اضغط تحديث الملخص"}
+            </p>
+          )}
         </div>
       )}
 
@@ -692,6 +786,33 @@ export function ChatWindow({
                     <Badge variant="outline" className="px-1 py-0 text-[9px]">
                       آلي
                     </Badge>
+                  )}
+                  {/* تقييم الرد الآلي: الجيد يُحقن كمثال في برومبت الوكيل */}
+                  {m.direction === "OUTBOUND" && m.senderType === "AI" && (
+                    <span className="flex items-center gap-0.5">
+                      <button
+                        title="رد جيد — يُستخدم في تدريب الوكيل"
+                        className={`rounded p-0.5 hover:bg-muted ${
+                          (ratings[m.id] ?? m.rating) === "GOOD"
+                            ? "text-emerald-600"
+                            : "text-muted-foreground"
+                        }`}
+                        onClick={() => handleRate(m.id, "GOOD")}
+                      >
+                        <ThumbsUp className="h-3 w-3" />
+                      </button>
+                      <button
+                        title="رد يحتاج تحسيناً"
+                        className={`rounded p-0.5 hover:bg-muted ${
+                          (ratings[m.id] ?? m.rating) === "NEEDS_IMPROVEMENT"
+                            ? "text-red-500"
+                            : "text-muted-foreground"
+                        }`}
+                        onClick={() => handleRate(m.id, "NEEDS_IMPROVEMENT")}
+                      >
+                        <ThumbsDown className="h-3 w-3" />
+                      </button>
+                    </span>
                   )}
                   <span>{messageTime(m.createdAt)}</span>
                   {m.direction === "OUTBOUND" && (

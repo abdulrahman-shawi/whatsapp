@@ -31,6 +31,13 @@ const viewTitles: Record<ListView, string> = {
   closed: "المحادثات المغلقة",
 };
 
+// مسميات وألوان مزاج/نية العميل — تُحدَّث تلقائياً عند كل رسالة واردة
+const sentimentConfig: Record<string, { label: string; className: string }> = {
+  INTERESTED: { label: "مهتم", className: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  ANGRY: { label: "غاضب", className: "border-red-300 bg-red-50 text-red-700" },
+  PRICE: { label: "سؤال سعر", className: "border-sky-300 bg-sky-50 text-sky-700" },
+};
+
 type Props = {
   conversations: ConversationListItem[];
   selectedId: string | null;
@@ -205,6 +212,15 @@ export function ConversationList({
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Badge variant={status.variant}>{status.label}</Badge>
+                  {c.sentiment && sentimentConfig[c.sentiment] && (
+                    <Badge
+                      variant="outline"
+                      className={`px-1.5 py-0 ${sentimentConfig[c.sentiment].className}`}
+                      title="نية الشراء والمزاج — يُحدَّث تلقائياً من آخر رسالة"
+                    >
+                      {sentimentConfig[c.sentiment].label}
+                    </Badge>
+                  )}
                   {c.platform === "WIDGET" && (
                     <Badge variant="outline">من الموقع</Badge>
                   )}

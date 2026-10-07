@@ -50,6 +50,8 @@ export async function GET(req: Request) {
       followUpAt: c.followUpAt ? c.followUpAt.toISOString() : null,
       tags: c.tags,
       notes: c.notes,
+      sentiment: c.sentiment,
+      summary: c.summary,
       lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),
       assignees: c.assignees.map((a) => a.user),
       contact: c.contact,

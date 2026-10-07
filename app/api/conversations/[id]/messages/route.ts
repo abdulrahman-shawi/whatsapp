@@ -21,6 +21,7 @@ function serialize(m: {
   mediaId: string | null;
   mediaMime: string | null;
   mediaType: string | null;
+  rating: string | null;
   createdAt: Date;
   sender?: { name: string } | null;
 }) {
@@ -34,6 +35,7 @@ function serialize(m: {
     mediaId: m.mediaId,
     mediaMime: m.mediaMime,
     mediaType: m.mediaType,
+    rating: m.rating,
     createdAt: m.createdAt.toISOString(),
     senderName: m.sender?.name ?? null,
   };

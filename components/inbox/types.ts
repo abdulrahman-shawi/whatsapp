@@ -33,6 +33,10 @@ export type ConversationListItem = {
   // وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
   tags: string[];
   notes: string | null;
+  // مزاج/نية العميل: INTERESTED | ANGRY | PRICE | NEUTRAL
+  sentiment: string | null;
+  // ملخص المحادثة المولّد بالذكاء الاصطناعي (إن وُجد)
+  summary: string | null;
   lastMessageAt: string;
   contact: ContactInfo;
   lastMessage: {
@@ -55,6 +59,8 @@ export type MessageItem = {
   mediaId: string | null;
   mediaMime: string | null;
   mediaType: string | null;
+  // تقييم الموظف لرد الذكاء الاصطناعي: GOOD أو NEEDS_IMPROVEMENT (تدريب الوكيل)
+  rating: string | null;
   createdAt: string;
 };
 

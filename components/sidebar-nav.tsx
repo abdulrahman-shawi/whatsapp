@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/agents", label: "الوكلاء", icon: Bot, ownerOnly: true },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
   { href: "/usage", label: "الاستهلاك", icon: Gauge },
+  { href: "/reports", label: "التقارير", icon: BarChart3 },
   { href: "/billing", label: "الاشتراك", icon: CreditCard, ownerOnly: true },
   { href: "/settings", label: "الإعدادات", icon: Settings, ownerOnly: true },
 ];

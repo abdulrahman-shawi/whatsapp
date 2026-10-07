@@ -6,6 +6,7 @@ import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
 import { triggerWorkflows } from "@/lib/workflows";
+import { detectLanguage, detectSentiment, LANGUAGE_NAMES } from "@/lib/sentiment";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -112,9 +113,14 @@ async function runPipeline(
     },
   });
   // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
+  // + تحديث مزاج/نية العميل من نص رسالته (شارة الأولوية في الوارد)
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { lastMessageAt: new Date(), closedAt: null },
+    data: {
+      lastMessageAt: new Date(),
+      closedAt: null,
+      sentiment: detectSentiment(text),
+    },
   });
 
   // بث فوري لصندوق الوارد — لا يؤثر على شيء إن لم يكن Pusher مفعّلاً
@@ -218,9 +224,32 @@ async function runPipeline(
       text,
       waPhone
     );
+    // تدريب من المحادثات: حقن أمثلة الردود التي علّمها الفريق "جيدة" في البرومبت
+    // + تعليمة الرد بلغة العميل نفسها (كشف مجاني بلا توكنات)
+    const goodExamples = await prisma.message.findMany({
+      where: { rating: "GOOD", conversation: { workspaceId } },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { body: true },
+    });
+    const lang = detectLanguage(text);
+    const styleHints = [
+      `أجب بلغة العميل نفسها (${LANGUAGE_NAMES[lang]}) حتى لو اختلفت لغة تعليماتك.`,
+      ...(goodExamples.length > 0
+        ? [
+            "أمثلة على ردود اعتمدها الفريق وسجّلها جيدة — حافظ على أسلوبها وطولها تقريباً:",
+            ...goodExamples.map((g) => `• ${g.body}`),
+          ]
+        : []),
+    ];
     // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
     const aiConfig = await resolveAiConfig(workspaceId);
-    const aiReply = await generateReply(history, agent.systemPrompt, knowledge, aiConfig);
+    const aiReply = await generateReply(
+      history,
+      agent.systemPrompt,
+      [...knowledge, ...styleHints],
+      aiConfig
+    );
     reply = aiReply?.content ?? null;
     // استهلاك التوكنات الفعلي — يُخصم من رصيد الباقة الشهري
     if (aiReply) tokensUsed = aiReply.usage.totalTokens;
@@ -324,9 +353,14 @@ async function storeInboundWithoutAgent(input: {
     },
   });
   // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
+  // + تحديث مزاج/نية العميل من نص رسالته (شارة الأولوية في الوارد)
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { lastMessageAt: new Date(), closedAt: null },
+    data: {
+      lastMessageAt: new Date(),
+      closedAt: null,
+      sentiment: detectSentiment(input.text),
+    },
   });
   await incrementUsage(workspaceId);
 

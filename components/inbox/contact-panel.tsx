@@ -1,14 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, MessagesSquare, Plus, X } from "lucide-react";
+import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CONTACT_STAGES, stageConfig } from "@/lib/contact-stages";
+import { relativeTime } from "@/lib/time";
 import type { ContactInfo } from "./types";
+
+type ActivityEvent = {
+  type: "message_in" | "message_out" | "booking";
+  id: string;
+  body: string;
+  ai: boolean;
+  createdAt: string;
+};
 
 type Props = {
   contact: ContactInfo;
@@ -30,6 +39,7 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
   const [bookings, setBookings] = useState<
     { id: string; title: string; scheduledAt: string; notes: string | null }[]
   >([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +47,12 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data?.bookings) setBookings(data.bookings);
+      })
+      .catch(() => {});
+    fetch(`/api/contacts/${contact.id}/activity`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.events) setActivity(data.events);
       })
       .catch(() => {});
     return () => {
@@ -251,6 +267,58 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
                 {b.notes && (
                   <p className="mt-1 text-xs text-muted-foreground">{b.notes}</p>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* سجل النشاط — خط زمني للرسائل والحجوزات */}
+      <div className="space-y-2">
+        <Label className="flex items-center gap-1">
+          <History className="h-3.5 w-3.5" />
+          سجل النشاط
+        </Label>
+        {activity.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+            لا يوجد نشاط مسجل بعد
+          </p>
+        ) : (
+          <div className="space-y-0.5">
+            {activity.map((e) => (
+              <div key={`${e.type}-${e.id}`} className="flex gap-2.5 text-xs">
+                <div className="flex flex-col items-center pt-1">
+                  {e.type === "booking" ? (
+                    <CalendarDays className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  ) : e.type === "message_in" ? (
+                    <ArrowDownLeft className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  ) : (
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="mt-1 w-px flex-1 bg-border" />
+                </div>
+                <div className="min-w-0 flex-1 pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="shrink-0 font-medium">
+                      {e.type === "booking"
+                        ? "حجز"
+                        : e.type === "message_in"
+                          ? "رسالة واردة"
+                          : "رد مرسل"}
+                    </span>
+                    {e.ai && (
+                      <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+                        آلي
+                      </Badge>
+                    )}
+                    <span className="shrink-0 text-muted-foreground">
+                      {relativeTime(e.createdAt)}
+                    </span>
+                  </div>
+                  {e.body && (
+                    <p className="line-clamp-2 text-muted-foreground">{e.body}</p>
+                  )}
+                </div>
               </div>
             ))}
           </div>

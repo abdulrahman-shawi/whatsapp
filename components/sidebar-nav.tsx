@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3 } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3, Users, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
 const navItems = [
   { href: "/inbox", label: "الوارد", icon: Inbox },
+  { href: "/contacts", label: "العملاء", icon: Users },
+  { href: "/bookings", label: "الحجوزات", icon: CalendarDays },
   { href: "/broadcast", label: "الحملات", icon: Megaphone, ownerOnly: true },
   { href: "/workflows", label: "سير العمل", icon: Workflow, ownerOnly: true },
   { href: "/agents", label: "الوكلاء", icon: Bot, ownerOnly: true },

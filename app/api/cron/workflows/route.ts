@@ -4,6 +4,7 @@ import {
   runNoReplyWorkflows,
 } from "@/lib/workflows";
 import { sendDueScheduledMessages } from "@/lib/conversations";
+import { sendBookingReminders } from "@/lib/bookings";
 
 // استئناف خطوات "انتظار" + فحص محفّز "لا رد" + إرسال الرسائل المجدولة
 // يعمل عبر كرون Vercel (مرة يومياً على الخطة المجانية) أو نداء خارجي دوري
@@ -30,11 +31,13 @@ export async function GET(req: Request) {
   const resumed = await run("استئناف سير العمل", resumeWaitingWorkflowRuns);
   const noReplyFired = await run("محفز لا رد", runNoReplyWorkflows);
   const scheduled = await run("الرسائل المجدولة", sendDueScheduledMessages);
+  const bookingReminders = await run("تذكير الحجوزات", sendBookingReminders);
 
   return NextResponse.json({
     resumed,
     noReplyFired,
     scheduled,
+    bookingReminders,
     errors,
   });
 }

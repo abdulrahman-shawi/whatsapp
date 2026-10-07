@@ -375,6 +375,7 @@ model Booking {
   title       String
   scheduledAt DateTime
   notes       String?
+  remindedAt  DateTime? // وقت إرسال التذكير التلقائي (ساعة قبل الموعد)
   createdAt   DateTime @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)

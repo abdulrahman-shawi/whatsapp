@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Download, Inbox, Loader2, Search } from "lucide-react";
+import { CalendarDays, Download, GripVertical, Inbox, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CONTACT_STAGES, stageConfig } from "@/lib/contact-stages";
 import { relativeTime } from "@/lib/time";
-import { StageBadge } from "@/components/inbox/stage-badge";
+import { cn } from "@/lib/utils";
 
 type ContactRow = {
   id: string;
@@ -27,20 +27,20 @@ type ContactRow = {
   } | null;
 };
 
-// قائمة العملاء الكاملة: بحث وفلاتر (مرحلة/وسم) + تصدير CSV
+// لوحة كانبان لمسار البيع: بحث وفلاتر (وسم) + تصدير CSV + سحب وإفلات لتغيير المرحلة
 export function ContactsClient() {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [stage, setStage] = useState("");
   const [tag, setTag] = useState("");
+  const [overStage, setOverStage] = useState<string | null>(null);
+  const [savingStage, setSavingStage] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
-      if (stage) params.set("stage", stage);
       if (tag.trim()) params.set("tag", tag.trim());
       const res = await fetch(`/api/contacts?${params}`);
       if (res.ok) {
@@ -50,7 +50,7 @@ export function ContactsClient() {
     } finally {
       setLoading(false);
     }
-  }, [q, stage, tag]);
+  }, [q, tag]);
 
   useEffect(() => {
     const t = setTimeout(load, 300);
@@ -86,6 +86,46 @@ export function ContactsClient() {
     URL.revokeObjectURL(url);
   }
 
+  async function handleDrop(e: React.DragEvent, stage: string) {
+    e.preventDefault();
+    setOverStage(null);
+    const id = e.dataTransfer.getData("text/plain");
+    if (!id || savingStage) return;
+    const contact = contacts.find((c) => c.id === id);
+    if (!contact || contact.stage === stage) return;
+
+    const previous = contact.stage;
+    // تحريك تفاؤلي فوري، والتراجع عند الفشل
+    setContacts((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, stage } : c))
+    );
+    setSavingStage(true);
+    try {
+      const res = await fetch(`/api/contacts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        setContacts((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, stage: previous } : c))
+        );
+        alert(err?.error ?? "تعذّر تحديث المرحلة");
+      }
+    } catch {
+      setContacts((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, stage: previous } : c))
+      );
+      alert("تعذّر تحديث المرحلة");
+    } finally {
+      setSavingStage(false);
+    }
+  }
+
+  const countOf = (stage: string) =>
+    contacts.filter((c) => c.stage === stage).length;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -107,18 +147,6 @@ export function ContactsClient() {
             className="ps-8"
           />
         </div>
-        <select
-          value={stage}
-          onChange={(e) => setStage(e.target.value)}
-          className="rounded-md border bg-background px-2 py-1.5 text-sm"
-        >
-          <option value="">كل المراحل</option>
-          {CONTACT_STAGES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
         <Input
           value={tag}
           onChange={(e) => setTag(e.target.value)}
@@ -127,92 +155,107 @@ export function ContactsClient() {
         />
       </div>
 
-      {/* الجدول */}
-      <div className="overflow-x-auto rounded-xl border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40 text-start text-xs text-muted-foreground">
-              <th className="p-3 text-start font-medium">الاسم</th>
-              <th className="p-3 text-start font-medium">الرقم</th>
-              <th className="p-3 text-start font-medium">المرحلة</th>
-              <th className="p-3 text-start font-medium">الوسوم</th>
-              <th className="p-3 text-center font-medium">محادثات</th>
-              <th className="p-3 text-center font-medium">حجوزات</th>
-              <th className="p-3 text-start font-medium">آخر نشاط</th>
-              <th className="p-3 text-start font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={8} className="p-10 text-center text-muted-foreground">
-                  <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-                </td>
-              </tr>
-            ) : contacts.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="p-10 text-center text-muted-foreground">
-                  لا عملاء مطابقون للفلاتر
-                </td>
-              </tr>
-            ) : (
-              contacts.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="p-3 font-medium">{c.name ?? "—"}</td>
-                  <td className="p-3 text-muted-foreground" dir="ltr">
-                    {c.waPhone}
-                  </td>
-                  <td className="p-3">
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: stageConfig(c.stage).color }}
-                      />
-                      <StageBadge stage={c.stage} />
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <span className="flex max-w-40 flex-wrap gap-1">
-                      {c.tags.slice(0, 3).map((t) => (
-                        <Badge key={t} variant="outline" className="px-1.5 text-[10px]">
-                          {t}
-                        </Badge>
-                      ))}
-                    </span>
-                  </td>
-                  <td className="p-3 text-center">{c.conversationCount}</td>
-                  <td className="p-3 text-center">
-                    {c.bookingCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-primary">
-                        <CalendarDays className="h-3.5 w-3.5" />
-                        {c.bookingCount}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="p-3 text-xs text-muted-foreground">
-                    {c.lastConversation?.lastMessageAt
-                      ? relativeTime(c.lastConversation.lastMessageAt)
-                      : "—"}
-                  </td>
-                  <td className="p-3">
-                    {c.lastConversation && (
-                      <Link
-                        href={`/inbox?c=${c.lastConversation.id}`}
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <Inbox className="h-3.5 w-3.5" />
-                        فتح
-                      </Link>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {loading ? (
+        <div className="flex justify-center p-10">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : contacts.length === 0 ? (
+        <div className="rounded-xl border bg-card p-10 text-center text-muted-foreground">
+          لا عملاء مطابقون للفلاتر
+        </div>
+      ) : (
+        /* لوحة كانبان: عمود لكل مرحلة — الحاوية dir=rtl فتبدأ المرحلة الأولى من اليمين */
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {CONTACT_STAGES.map((s) => (
+            <div
+              key={s.value}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (overStage !== s.value) setOverStage(s.value);
+              }}
+              onDragLeave={() => setOverStage((v) => (v === s.value ? null : v))}
+              onDrop={(e) => void handleDrop(e, s.value)}
+              className={cn(
+                "flex w-64 shrink-0 flex-col rounded-xl border bg-muted/30 transition-colors",
+                overStage === s.value && "border-primary bg-accent/40 ring-2 ring-primary"
+              )}
+            >
+              {/* رأس العمود */}
+              <div className="flex items-center gap-2 border-b p-3">
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: stageConfig(s.value).color }}
+                />
+                <span className="text-sm font-medium">{s.label}</span>
+                <span className="ms-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                  {countOf(s.value)}
+                </span>
+              </div>
+
+              {/* جسم العمود: بطاقات قابلة للسحب */}
+              <div className="flex min-h-[80px] flex-col gap-2 p-2">
+                {contacts
+                  .filter((c) => c.stage === s.value)
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", c.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="cursor-grab rounded-lg border bg-card p-2.5 text-sm shadow-sm active:cursor-grabbing"
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="font-medium">
+                          {c.name ?? c.waPhone}
+                        </p>
+                        <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </div>
+                      {c.name && (
+                        <p className="text-xs text-muted-foreground" dir="ltr">
+                          {c.waPhone}
+                        </p>
+                      )}
+                      {c.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {c.tags.slice(0, 2).map((t) => (
+                            <Badge key={t} variant="outline" className="px-1.5 text-[10px]">
+                              {t}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-1.5 flex items-center justify-between gap-1">
+                        <span className="text-[11px] text-muted-foreground">
+                          {c.lastConversation?.lastMessageAt
+                            ? relativeTime(c.lastConversation.lastMessageAt)
+                            : relativeTime(c.createdAt)}
+                        </span>
+                        {c.bookingCount > 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[11px] text-primary">
+                            <CalendarDays className="h-3 w-3" />
+                            {c.bookingCount}
+                          </span>
+                        )}
+                      </div>
+                      {c.lastConversation && (
+                        <Link
+                          href={`/inbox?c=${c.lastConversation.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-1.5 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-muted"
+                        >
+                          <Inbox className="h-3 w-3" />
+                          فتح
+                        </Link>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

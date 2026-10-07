@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,6 +104,17 @@ export function BookingsClient() {
     }
   }
 
+  async function handleDelete(id: string) {
+    if (!window.confirm("حذف هذا الحجز؟")) return;
+    const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+    } else {
+      const err = await res.json().catch(() => null);
+      alert(err?.error ?? "تعذّر حذف الحجز");
+    }
+  }
+
   const dayStr = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -169,11 +180,24 @@ export function BookingsClient() {
                 {dayBookings.slice(0, 3).map((b) => (
                   <span
                     key={b.id}
-                    className="block truncate rounded bg-primary/10 px-1 text-[10px] text-primary"
+                    className="flex items-center gap-0.5 rounded bg-primary/10 px-1 text-[10px] text-primary"
                     title={`${b.title} — ${b.contact.name ?? b.contact.waPhone}`}
                   >
-                    {new Date(b.scheduledAt).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" })}{" "}
-                    {b.title}
+                    <span className="flex-1 truncate">
+                      {new Date(b.scheduledAt).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" })}{" "}
+                      {b.title}
+                    </span>
+                    <span
+                      role="button"
+                      aria-label="حذف الحجز"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDelete(b.id);
+                      }}
+                      className="shrink-0 text-muted-foreground hover:text-red-600"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </span>
                   </span>
                 ))}
                 {dayBookings.length > 3 && (

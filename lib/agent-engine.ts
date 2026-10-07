@@ -103,10 +103,12 @@ async function runPipeline(
   const existingContact = await prisma.contact.findFirst({
     where: { workspaceId, waPhone },
   });
+  // الاسم الوارد من واتساب (اسم الملف الشخصي) يُعتمد فقط إذا لم يكن للعميل اسم —
+  // حفاظاً على الاسم الذي عدّله الفريق يدوياً من لوحة جهة الاتصال
   const contact = existingContact
     ? await prisma.contact.update({
         where: { id: existingContact.id },
-        data: contactName ? { name: contactName } : {},
+        data: contactName && !existingContact.name ? { name: contactName } : {},
       })
     : await prisma.contact.create({
         data: { workspaceId, waPhone, name: contactName },
@@ -390,11 +392,19 @@ async function storeInboundWithoutAgent(input: {
     workspaceId = workspace.id;
   }
 
+  // لا نستبدل اسماً موجوداً — الاسم المعدل يدوياً أو المسجل سابقاً له الأولوية
+  const existingForName = await prisma.contact.findFirst({
+    where: { workspaceId, waPhone: input.waPhone },
+    select: { name: true },
+  });
   const contact = await prisma.contact.upsert({
     where: {
       workspaceId_waPhone: { workspaceId, waPhone: input.waPhone },
     },
-    update: input.contactName ? { name: input.contactName } : {},
+    update:
+      input.contactName && !existingForName?.name
+        ? { name: input.contactName }
+        : {},
     create: {
       workspaceId,
       waPhone: input.waPhone,

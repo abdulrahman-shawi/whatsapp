@@ -5,8 +5,9 @@ import {
 } from "@/lib/workflows";
 import { sendDueScheduledMessages } from "@/lib/conversations";
 
-// استئناف خطوات "انتظار" + فحص محفّز "لا رد" + إرسال الرسائل المجدولة — كل ٥ دقائق (انظر vercel.json)
-// الحماية عبر: Authorization: Bearer ${CRON_SECRET}
+// استئناف خطوات "انتظار" + فحص محفّز "لا رد" + إرسال الرسائل المجدولة
+// يعمل عبر كرون Vercel (مرة يومياً على الخطة المجانية) أو نداء خارجي دوري
+// إلى هذا المسار مع ترويسة Authorization: Bearer ${CRON_SECRET}
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization");
@@ -14,8 +15,26 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
   }
 
-  const resumed = await resumeWaitingWorkflowRuns();
-  const noReplyFired = await runNoReplyWorkflows();
-  const scheduledSent = await sendDueScheduledMessages();
-  return NextResponse.json({ resumed, noReplyFired, scheduledSent });
+  // كل مرحلة معزولة — فشل واحد (مثلاً نوم قاعدة البيانات) لا يمنع بقيتها
+  const errors: string[] = [];
+  const run = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      errors.push(`${label}: ${e instanceof Error ? e.message.slice(0, 200) : "خطأ"}`);
+      console.error(`[cron] فشل مرحلة ${label}:`, e);
+      return null;
+    }
+  };
+
+  const resumed = await run("استئناف سير العمل", resumeWaitingWorkflowRuns);
+  const noReplyFired = await run("محفز لا رد", runNoReplyWorkflows);
+  const scheduled = await run("الرسائل المجدولة", sendDueScheduledMessages);
+
+  return NextResponse.json({
+    resumed,
+    noReplyFired,
+    scheduled,
+    errors,
+  });
 }

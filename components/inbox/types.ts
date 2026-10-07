@@ -77,4 +77,6 @@ export type ScheduledMessage = {
   id: string;
   body: string;
   sendAt: string;
+  attempts: number;
+  lastError: string | null;
 };

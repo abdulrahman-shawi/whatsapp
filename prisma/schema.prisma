@@ -278,6 +278,8 @@ model ScheduledMessage {
   body           String        @db.Text
   sendAt         DateTime
   sentAt         DateTime? // وجود قيمة تعني أنها أُرسلت
+  attempts       Int           @default(0) // محاولات الإرسال الفاشلة — نتوقف بعد ٥
+  lastError      String? // سبب آخر محاولة فاشلة (للعرض في الواجهة)
   createdById    String?
   createdAt      DateTime      @default(now())
   conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)

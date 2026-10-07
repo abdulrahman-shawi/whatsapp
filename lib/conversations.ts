@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
+import { resolveWhatsAppCreds, sendWhatsAppMessage, getLastWhatsAppError } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 
 // فلتر الإسناد: الكل / محادثاتي / غير المسندة
@@ -100,7 +100,12 @@ export type ConversationListItem = Awaited<
 
 // إرسال الرسائل المجدولة التي حان موعدها — تُستدعى من كرون كل ٥ دقائق
 // لكل رسالة: إرسال فعلي عبر مزود واتساب + حفظ نسخة في المحادثة + تعليمها مُرسلة
-export async function sendDueScheduledMessages(): Promise<number> {
+// عند الفشل: نؤجل ٥ دقائق ونسجّل السبب — وبعد ٥ محاولات نتوقف عن إعادة المحاولة
+export async function sendDueScheduledMessages(): Promise<{
+  sent: number;
+  failed: number;
+  gaveUp: number;
+}> {
   const due = await prisma.scheduledMessage.findMany({
     where: { sentAt: null, sendAt: { lte: new Date() } },
     take: 50,
@@ -108,9 +113,11 @@ export async function sendDueScheduledMessages(): Promise<number> {
       conversation: { include: { contact: { select: { waPhone: true } } } },
     },
   });
-  if (due.length === 0) return 0;
+  if (due.length === 0) return { sent: 0, failed: 0, gaveUp: 0 };
 
   let sent = 0;
+  let failed = 0;
+  let gaveUp = 0;
   for (const item of due) {
     try {
       const creds = await resolveWhatsAppCreds(item.workspaceId);
@@ -120,7 +127,10 @@ export async function sendDueScheduledMessages(): Promise<number> {
         item.body,
         creds
       );
-      if (!ok) throw new Error("فشل الإرسال عبر المزود");
+      if (!ok) {
+        const detail = getLastWhatsAppError();
+        throw new Error("فشل الإرسال عبر المزود" + (detail ? ` — ${detail}` : ""));
+      }
 
       const message = await prisma.message.create({
         data: {
@@ -153,15 +163,24 @@ export async function sendDueScheduledMessages(): Promise<number> {
       triggerConversationUpdated(item.workspaceId, item.conversationId);
       sent++;
     } catch (e) {
-      // نؤجل المحاولة للدورة التالية: نرجع الموعد ٥ دقائق لتفادي حلقة فشل فورية
-      console.error("[scheduled] فشل إرسال رسالة مجدولة:", e);
+      const reason = e instanceof Error ? e.message.slice(0, 300) : "خطأ غير معروف";
+      console.error("[scheduled] فشل إرسال رسالة مجدولة:", reason);
+      const attempts = item.attempts + 1;
+      // بعد ٥ محاولات نتوقف عن التأجيل التلقائي — تبقى في القائمة بسبب الفشل المعروض
+      const reschedule = attempts < 5;
       await prisma.scheduledMessage
         .update({
           where: { id: item.id },
-          data: { sendAt: new Date(Date.now() + 5 * 60 * 1000) },
+          data: {
+            attempts,
+            lastError: reason,
+            ...(reschedule ? { sendAt: new Date(Date.now() + 5 * 60 * 1000) } : {}),
+          },
         })
         .catch(() => {});
+      if (reschedule) failed++;
+      else gaveUp++;
     }
   }
-  return sent;
+  return { sent, failed, gaveUp };
 }

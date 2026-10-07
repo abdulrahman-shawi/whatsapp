@@ -24,8 +24,11 @@ export async function GET(_req: Request, { params }: Params) {
   });
   return NextResponse.json({
     items: items.map((i) => ({
-      ...i,
+      id: i.id,
+      body: i.body,
       sendAt: i.sendAt.toISOString(),
+      attempts: i.attempts,
+      lastError: i.lastError,
       createdAt: i.createdAt.toISOString(),
     })),
   });

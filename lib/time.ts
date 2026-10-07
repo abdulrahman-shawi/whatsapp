@@ -60,3 +60,13 @@ export function messageTime(date: string | Date): string {
     minute: "2-digit",
   }).format(new Date(date));
 }
+
+// تاريخ ووقت كامل — للمواعيد المستقبلية (مجدولة/متابعات) حيث يهم اليوم لا الساعة فقط
+export function dateTime(date: string | Date): string {
+  return new Intl.DateTimeFormat("ar", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(date));
+}

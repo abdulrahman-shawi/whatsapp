@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { messageTime } from "@/lib/time";
+import { messageTime, dateTime } from "@/lib/time";
 import type {
   CannedResponse,
   ConversationListItem,
@@ -508,7 +508,7 @@ export function ChatWindow({
               size="sm"
               title={
                 followUpAt
-                  ? `موعد المتابعة: ${messageTime(followUpAt)}`
+                  ? `موعد المتابعة: ${dateTime(followUpAt)}`
                   : "ضبط موعد متابعة"
               }
               onClick={() => {
@@ -519,7 +519,7 @@ export function ChatWindow({
               }}
             >
               <BellRing className="h-4 w-4" />
-              {followUpAt ? messageTime(followUpAt) : "متابعة"}
+              {followUpAt ? dateTime(followUpAt) : "متابعة"}
             </Button>
             {followUpOpen && (
               <>
@@ -973,21 +973,29 @@ export function ChatWindow({
                     {scheduled.map((s) => (
                       <div
                         key={s.id}
-                        className="flex items-center gap-1 rounded-sm p-1 text-xs hover:bg-muted"
+                        className="rounded-sm p-1 text-xs hover:bg-muted"
                       >
-                        <span className="shrink-0 font-medium text-primary">
-                          {messageTime(s.sendAt)}
-                        </span>
-                        <span className="line-clamp-1 flex-1 text-muted-foreground">
-                          {s.body}
-                        </span>
-                        <button
-                          className="shrink-0 text-muted-foreground hover:text-destructive"
-                          title="إلغاء الجدولة"
-                          onClick={() => handleCancelScheduled(s.id)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <span className="shrink-0 font-medium text-primary">
+                            {dateTime(s.sendAt)}
+                          </span>
+                          <span className="line-clamp-1 flex-1 text-muted-foreground">
+                            {s.body}
+                          </span>
+                          <button
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
+                            title="إلغاء الجدولة"
+                            onClick={() => handleCancelScheduled(s.id)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {/* سبب فشل آخر محاولة إرسال (إن توقفت المحاولات) */}
+                        {s.lastError && s.attempts >= 5 && (
+                          <p className="mt-0.5 truncate text-destructive" title={s.lastError}>
+                            توقفت المحاولات: {s.lastError}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>

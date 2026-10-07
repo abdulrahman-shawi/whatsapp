@@ -5,7 +5,7 @@ import { Archive, BellRing, CalendarClock, CheckCheck, Inbox as InboxIcon, Searc
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { relativeTime, messageTime } from "@/lib/time";
+import { relativeTime, dateTime } from "@/lib/time";
 import { StageBadge } from "./stage-badge";
 import type { ListView } from "./inbox-client";
 import type {
@@ -212,15 +212,15 @@ export function ConversationList({
                     <Badge
                       variant="outline"
                       className="gap-1 border-amber-300 text-amber-700"
-                      title={`متابعة: ${messageTime(c.followUpAt)}`}
+                      title={`متابعة: ${dateTime(c.followUpAt)}`}
                     >
                       <CalendarClock className="h-3 w-3" />
-                      {messageTime(c.followUpAt)}
+                      {dateTime(c.followUpAt)}
                     </Badge>
                   )}
                   {view === "followups" && c.followUpAt && (
                     <span className="text-xs text-amber-700">
-                      متابعة {messageTime(c.followUpAt)}
+                      متابعة {dateTime(c.followUpAt)}
                     </span>
                   )}
                   {c.assignees.length > 0 && (

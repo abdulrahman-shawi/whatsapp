@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BellRing, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { messageTime } from "@/lib/time";
+import { dateTime } from "@/lib/time";
 
 type DueItem = {
   id: string;
@@ -85,7 +85,7 @@ export function RemindersBell() {
                         {item.contactName}
                       </span>
                       <span className="block text-xs text-muted-foreground">
-                        {messageTime(item.followUpAt)}
+                        {dateTime(item.followUpAt)}
                         {item.assignees.length > 0 &&
                           ` — ${item.assignees.map((a) => a.name).join("، ")}`}
                       </span>

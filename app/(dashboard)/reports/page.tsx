@@ -19,7 +19,7 @@ export default async function ReportsPage() {
   monthStart.setHours(0, 0, 0, 0);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [conversations, contacts, recentMessages, monthMessages, bookings, ratings, timingMessages, inboundBodies, staffMessages, staffAssignments, members] =
+  const [conversations, contacts, recentMessages, monthMessages, bookings, ratings, timingMessages, inboundBodies, staffMessages, staffAssignments, members, csatAgg] =
     await Promise.all([
       prisma.conversation.findMany({
         where: { workspaceId: ctx.workspaceId },
@@ -76,6 +76,12 @@ export default async function ReportsPage() {
       prisma.workspaceMember.findMany({
         where: { workspaceId: ctx.workspaceId },
         select: { user: { select: { id: true, name: true } } },
+      }),
+      // متوسط تقييم الرضا (CSAT) للمحادثات المقيّمة
+      prisma.conversation.aggregate({
+        where: { workspaceId: ctx.workspaceId, csatRating: { not: null } },
+        _avg: { csatRating: true },
+        _count: true,
       }),
     ]);
 
@@ -266,6 +272,29 @@ export default async function ReportsPage() {
             <p className="text-xs text-muted-foreground">
               قيّم ردود الذكاء من الوارد بأزرار الإبهام — الجيد منها يصبح مثالاً يحتذيه الوكيل.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* تقييم الرضا (CSAT) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">تقييم الرضا (CSAT)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {csatAgg._count > 0 ? (
+              <>
+                <p className="text-2xl font-bold text-primary">
+                  {(csatAgg._avg.csatRating ?? 0).toFixed(1)}/٥
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  من {csatAgg._count} محادثة مقيّمة
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                لا توجد تقييمات بعد — تُرسل تلقائياً بعد إغلاق المحادثة
+              </p>
+            )}
           </CardContent>
         </Card>
 

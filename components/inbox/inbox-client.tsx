@@ -427,6 +427,7 @@ export function InboxClient({
               id: selected.id,
               tags: selected.tags,
               notes: selected.notes,
+              csatRating: selected.csatRating,
             }}
             onSaveConversation={handleUpdateConversation}
           />

@@ -11,7 +11,7 @@ export default async function BroadcastPage() {
   if (!ctx) redirect("/login");
   if (ctx.role !== "OWNER") redirect("/inbox");
 
-  const [campaigns, contacts, templates] = await Promise.all([
+  const [campaigns, contacts, templates, clicks] = await Promise.all([
     prisma.broadcastCampaign.findMany({
       where: { workspaceId: ctx.workspaceId },
       orderBy: { createdAt: "desc" },
@@ -25,10 +25,18 @@ export default async function BroadcastPage() {
       where: { workspaceId: ctx.workspaceId },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.broadcastClick.groupBy({
+      by: ["campaignId"],
+      _count: true,
+    }),
   ]);
 
   // تجميع التسميات المستعملة من جهات الاتصال
   const tags = [...new Set(contacts.flatMap((c) => c.tags))].sort();
+  // عدد النقرات لكل حملة — يُعرض في سجل الحملات كنسبة تفاعل
+  const clickCountByCampaign = new Map(
+    clicks.map((c) => [c.campaignId, c._count])
+  );
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -41,6 +49,7 @@ export default async function BroadcastPage() {
       <BroadcastClient
         initialCampaigns={campaigns.map((c) => ({
           ...c,
+          clickCount: clickCountByCampaign.get(c.id) ?? 0,
           createdAt: c.createdAt.toISOString(),
           scheduledAt: c.scheduledAt ? c.scheduledAt.toISOString() : null,
         }))}

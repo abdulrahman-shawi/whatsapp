@@ -81,6 +81,7 @@ export async function getWorkspaceConversations(
     followUpAt: c.followUpAt ? c.followUpAt.toISOString() : null,
     tags: c.tags,
     notes: c.notes,
+    csatRating: c.csatRating,
     sentiment: c.sentiment,
     summary: c.summary,
     lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),

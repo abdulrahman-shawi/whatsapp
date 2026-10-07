@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3, Users, CalendarDays } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3, Users, CalendarDays, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
@@ -11,6 +11,7 @@ const navItems = [
   { href: "/contacts", label: "العملاء", icon: Users },
   { href: "/bookings", label: "الحجوزات", icon: CalendarDays },
   { href: "/broadcast", label: "الحملات", icon: Megaphone, ownerOnly: true },
+  { href: "/forms", label: "نماذج العملاء", icon: ClipboardList, ownerOnly: true },
   { href: "/workflows", label: "سير العمل", icon: Workflow, ownerOnly: true },
   { href: "/agents", label: "الوكلاء", icon: Bot, ownerOnly: true },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },

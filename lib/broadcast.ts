@@ -1,17 +1,73 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import {
   resolveWhatsAppCreds,
   sendWhatsAppMessage,
   sendWhatsAppTemplate,
 } from "@/lib/whatsapp";
 import { getUsageStatus } from "@/lib/billing/plans";
+import { isContactStage, type ContactStageValue } from "@/lib/contact-stages";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
 
+// استهداف الحملة المركّب: تسميات + مرحلة + خمول (لم يتفاعل منذ N يوم)
+export type BroadcastAudience = {
+  tags: string[];
+  stage: ContactStageValue | null;
+  inactiveDays: number | null;
+};
+
+// قراءة حقل audience JSON بأمان مع قيم افتراضية عند التلف
+export function parseAudience(raw: unknown): BroadcastAudience {
+  const empty: BroadcastAudience = { tags: [], stage: null, inactiveDays: null };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return empty;
+  const obj = raw as Record<string, unknown>;
+  const tags = Array.isArray(obj.tags)
+    ? [...new Set(obj.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))]
+    : [];
+  const stage = isContactStage(obj.stage) ? obj.stage : null;
+  const inactiveDays =
+    typeof obj.inactiveDays === "number" && obj.inactiveDays > 0
+      ? Math.floor(obj.inactiveDays)
+      : null;
+  return { tags, stage, inactiveDays };
+}
+
+// بناء شرط الاستعلام الموحّد للجمهور — يُستخدم في الإرسال ومعاينة الحجم والتحقق عند الإنشاء
+// خمول N يوم: لا محادثة نشطة (lastMessageAt بعد القطع) — يشمل من ليس لديه محادثات أصلاً
+export function buildAudienceWhere(
+  workspaceId: string,
+  audience: BroadcastAudience
+): Prisma.ContactWhereInput {
+  const where: Prisma.ContactWhereInput = { workspaceId };
+  if (audience.tags.length > 0) where.tags = { hasSome: audience.tags };
+  if (audience.stage) where.stage = audience.stage;
+  if (audience.inactiveDays != null) {
+    const cutoff = new Date(Date.now() - audience.inactiveDays * 86400000);
+    where.conversations = { none: { lastMessageAt: { gt: cutoff } } };
+  }
+  return where;
+}
+
+// قاعدة رابط التتبّع — فارغة إن لم تُضبط بيئة النشر (يسقط حينها لرابط العرض المجرد)
+export function trackingBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
+  );
+}
+
 // مفتاح الشهر الحالي لسجل الاستهلاك
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+// تخصيص نص الرسالة لكل عميل: {{name}} باسمه المعروض و{{link}} برابط التتبّع (إن وُجد)
+function personalize(body: string, displayName: string, link: string | null): string {
+  let text = body.replaceAll("{{name}}", displayName);
+  if (link) text = text.replaceAll("{{link}}", link);
+  return text;
 }
 
 // الإرسال الفعلي للحملة: يُستدعى فوراً من مسار الإنشاء أو لاحقاً من cron الجدولة
@@ -31,12 +87,31 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
     });
   }
 
-  // جمهور الحملة: جهات الاتصال الحاملة للتسمية في مساحة العمل
+  // جمهور الحملة: الاستهداف المركّب (تسميات + مرحلة + خمول)
+  // توافق خلفي: حملات قديمة بلا audience تُدار بتسميتها المخزّنة
+  let audience = parseAudience(campaign.audience);
+  if (
+    audience.tags.length === 0 &&
+    !audience.stage &&
+    audience.inactiveDays == null &&
+    campaign.tag
+  ) {
+    audience = { ...audience, tags: [campaign.tag] };
+  }
   const contacts = await prisma.contact.findMany({
-    where: { workspaceId: campaign.workspaceId, tags: { has: campaign.tag } },
+    where: buildAudienceWhere(campaign.workspaceId, audience),
     select: { id: true, waPhone: true, name: true },
     take: MAX_AUDIENCE + 1,
   });
+
+  // رابط التتبّع لكل عميل: {{link}} تُستبدل برابط يمر عبر /api/track ثم يحوّل للعرض
+  const base = trackingBaseUrl();
+  const linkFor = (contactId: string) =>
+    campaign.linkUrl
+      ? base
+        ? `${base}/api/track/${campaign.id}/${contactId}?u=${encodeURIComponent(campaign.linkUrl)}`
+        : campaign.linkUrl
+      : null;
 
   const creds = await resolveWhatsAppCreds(campaign.workspaceId);
 
@@ -78,10 +153,10 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
             },
             creds
           )
-        : // الرسائل النصية: استبدال {{name}} باسم العميل لكل مستلم
+        : // الرسائل النصية: استبدال {{name}} باسم العميل و{{link}} برابط التتبّع لكل مستلم
           await sendWhatsAppMessage(
             contact.waPhone,
-            campaign.body.replaceAll("{{name}}", displayName),
+            personalize(campaign.body, displayName, linkFor(contact.id)),
             creds
           ));
     if (ok) sent++;

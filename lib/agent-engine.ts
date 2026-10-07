@@ -34,6 +34,14 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// تحليل إجابة تقييم الرضا: يقبل ١-٥ بالأرقام اللاتينية أو العربية المشرقية
+// مع تجاهل المسافات المحيطة — يعيد الرقم أو null إن لم يكن النص تقييماً
+function parseCsatRating(text: string): number | null {
+  const latin = text.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  const match = /^\s*([1-5])\s*$/.exec(latin);
+  return match ? Number(match[1]) : null;
+}
+
 type PipelineOptions = {
   workspaceId: string;
   agent: AgentWithKnowledge;
@@ -113,12 +121,15 @@ async function runPipeline(
     },
   });
   // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
+  // (إجابة تقييم الرضا وحدها لا تعيد الفتح)
   // + تحديث مزاج/نية العميل من نص رسالته (شارة الأولوية في الوارد)
+  const ratingNum = parseCsatRating(text);
+  const isCsatAnswer = conversation.csatPending && ratingNum !== null;
   await prisma.conversation.update({
     where: { id: conversation.id },
     data: {
       lastMessageAt: new Date(),
-      closedAt: null,
+      closedAt: isCsatAnswer ? conversation.closedAt : null,
       sentiment: detectSentiment(text),
     },
   });
@@ -129,6 +140,34 @@ async function runPipeline(
 
   // ٥. عدّ الاستهلاك الشهري
   await incrementUsage(workspaceId);
+
+  // ٥.أ إجابة تقييم الرضا: نسجّل التقييم، نشكر العميل، ونتوقف — بلا ذكاء اصطناعي
+  // ولا محفّزات سير عمل ولا كلمات تسليم على رسالة التقييم
+  if (isCsatAnswer && ratingNum !== null) {
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { csatRating: ratingNum, csatPending: false },
+    });
+    const thanksText = "شكراً لتقييمك! نقدّر ثقتك 🌟";
+    try {
+      await opts.sendReply(waPhone, thanksText);
+      await prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: "OUTBOUND",
+          senderType: "AI",
+          body: thanksText,
+        },
+      });
+      console.log(`[agent-engine] تسجيل تقييم رضا ${ratingNum}/٥ للمحادثة ${conversation.id}`);
+    } catch (e) {
+      console.error(
+        `[agent-engine] فشل إرسال شكر التقييم للمحادثة ${conversation.id}:`,
+        e instanceof Error ? e.message : e
+      );
+    }
+    return { conversationId: conversation.id, reply: null, status: "AI" };
+  }
 
   // ٥.ب مطابقة سير العمل: كلمات مفتاحية / أرقام محددة / عميل جديد
   // ننتظر اكتمالها — قد تغيّر حالة المحادثة (إيقاف الرد الآلي/إغلاق/إسناد)

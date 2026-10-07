@@ -109,6 +109,7 @@ model Workspace {
   mediaAssets MediaAsset[]
   cannedResponses CannedResponse[]
   scheduledMessages ScheduledMessage[]
+  leadForms   LeadForm[]
   planId     String?
   plan       Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
 }
@@ -132,7 +133,9 @@ model Plan {
 model BroadcastCampaign {
   id          String          @id @default(cuid())
   workspaceId String
-  tag         String // تسمية الجمهور المستهدف
+  tag         String // تسمية الجمهور المستهدف (الأولى من audience.tags — للتوافق الخلفي)
+  audience    Json            @default("{}") // استهداف مركّب: {tags:[], stage:null, inactiveDays:null}
+  linkUrl     String? // رابط العرض — يُدرج مكان {{link}} كرابط تتبّع لكل عميل
   body        String          @db.Text // نص الحملة (معاينة القالب إن وُجد)
   templateId  String? // قالب ميتا اختياري
   params      String[]        @default([]) // قيم المتغيرات {{1}} {{2}}... على مستوى الحملة — تدعم {{name}} للتخصيص لكل عميل
@@ -145,6 +148,18 @@ model BroadcastCampaign {
   createdById String?
   createdAt   DateTime        @default(now())
   workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  clicks      BroadcastClick[]
+}
+
+// نقرة على رابط تتبّع داخل حملة — نقرة واحدة تُحتسب لكل عميل
+model BroadcastClick {
+  id         String          @id @default(cuid())
+  campaignId String
+  contactId  String
+  clickedAt  DateTime        @default(now())
+  campaign   BroadcastCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
 }
 
 // دعوة انضمام لمرة واحدة: ينشئها المالك ويرسل الرابط للموظف
@@ -249,6 +264,10 @@ model Conversation {
   sentiment     String?   // INTERESTED | ANGRY | PRICE | NEUTRAL
   summary       String?   @db.Text // ملخص المحادثة المولّد بالذكاء الاصطناعي
   summarizedAt  DateTime?
+  // تقييم الرضا (CSAT): سؤال 1-5 يُرسل بعد إغلاق المحادثة ويُسجَّل رد العميل
+  csatPending   Boolean   @default(false) // بانتظار رد العميل بتقييم
+  csatRating    Int? // التقييم المسجَّل 1..5
+  csatAskedAt   DateTime? // وقت إرسال سؤال التقييم
 }
 
 // إسناد محادثة لموظف — نفس المحادثة قد تُسند لأكثر من شخص
@@ -391,6 +410,23 @@ model MediaAsset {
   dataBase64 String    @db.Text
   createdAt  DateTime  @default(now())
   workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// نموذج استقبال عملاء (Lead Form): صفحة عامة تعبّئ من المتصفح أو تُضمَّن كـ iframe
+// كل إرسال يُنشئ جهة اتصال + محادثة في الوارد مع وسم تلقائي ورسالة ترحيب
+model LeadForm {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String // اسماً داخلياً يميز النموذج في القائمة
+  title       String    @default("تواصل معنا")
+  description String?   @db.Text
+  fields      Json      @default("[]") // ‏[{label, type: text|phone|textarea, required}] — حقل phone واحد مطلوب على الأقل
+  autoTag     String    @default("") // وسم يُلصق تلقائياً بجهة الاتصال الواردة من النموذج
+  autoStage   String? // مرحلة افتراضية لجهة الاتصال (من CONTACT_STAGES)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // قالب رسالة واتساب معتمد في ميتا — يُرسل خارج نافذة ٢٤ ساعة

@@ -22,6 +22,8 @@ export async function PATCH(
     status?: (typeof STATUSES)[number];
     isArchived?: boolean;
     closedAt?: Date | null;
+    csatPending?: boolean;
+    csatAskedAt?: Date;
     tags?: string[];
     notes?: string | null;
   } = {};
@@ -65,6 +67,9 @@ export async function PATCH(
       return NextResponse.json({ error: "قيمة الإغلاق غير صالحة" }, { status: 400 });
     }
     data.closedAt = body.closed ? new Date() : null;
+    // سؤال تقييم الرضا: يُجدوَل بعد الإغلاق ويُلغى انتظار التقييم عند إعادة الفتح
+    data.csatPending = body.closed;
+    if (body.closed) data.csatAskedAt = new Date();
   }
   // وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
   if (body.tags !== undefined) {
@@ -95,6 +100,19 @@ export async function PATCH(
     where: { id: params.id },
     data,
   });
+
+  // سؤال تقييم الرضا: إذا أُغلقت المحادثة الآن (لم تكن مغلقة) نجدوَل سؤال التقييم
+  // ليُرسل بعد دقيقتين عبر الكرون — ونتجنّب التكرار إن كان انتظار التقييم مفعّلاً
+  if (body.closed === true && !existing.closedAt && !existing.csatPending) {
+    await prisma.scheduledMessage.create({
+      data: {
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.id,
+        body: "شكراً لتواصلك معنا 🌟\nكيف كانت تجربتك؟ قيّم خدمتنا بالرد برقم من ١ إلى ٥",
+        sendAt: new Date(Date.now() + 2 * 60 * 1000),
+      },
+    });
+  }
 
   // استبدال الإسنادات بالقائمة الجديدة (إن وُجدت) — حذف ثم إنشاء ذريّان
   if (assigneeIds !== null) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History } from "lucide-react";
+import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,13 @@ type Props = {
     patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes" | "stage">>
   ) => void;
   // بطاقة المحادثة: وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
-  conversation?: { id: string; tags: string[]; notes: string | null } | null;
+  conversation?: {
+    id: string;
+    tags: string[];
+    notes: string | null;
+    // تقييم رضا العميل عن المحادثة (١-٥) إن قيّم
+    csatRating?: number | null;
+  } | null;
   onSaveConversation?: (patch: { tags?: string[]; notes?: string | null }) => void;
 };
 
@@ -92,6 +98,23 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
             <MessagesSquare className="h-3.5 w-3.5" />
             بطاقة المحادثة
           </Label>
+          {conversation.csatRating != null && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">تقييم الرضا</span>
+              <div className="flex gap-0.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={`h-3.5 w-3.5 ${
+                      star <= conversation.csatRating!
+                        ? "fill-amber-400 text-amber-400"
+                        : "text-muted-foreground/40"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5">
             {conversation.tags.length === 0 && (
               <span className="text-xs text-muted-foreground">بلا وسوم</span>

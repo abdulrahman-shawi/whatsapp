@@ -3,25 +3,75 @@ import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds } from "@/lib/whatsapp";
 import { getUsageStatus } from "@/lib/billing/plans";
-import { sendBroadcast } from "@/lib/broadcast";
+import {
+  buildAudienceWhere,
+  parseAudience,
+  sendBroadcast,
+  type BroadcastAudience,
+} from "@/lib/broadcast";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
 
-// حملات البث الجماعي لمساحة العمل — الأحدث أولاً
-export async function GET() {
+// حملات البث الجماعي لمساحة العمل — الأحدث أولاً، مع عدد النقرات لكل حملة
+export async function GET(req: Request) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+
+  // معاينة حجم الجمهور: /api/broadcasts/audience?tags=a,b&stage=X&inactiveDays=N
+  const { searchParams } = new URL(req.url);
+  if (searchParams.has("audience")) {
+    const audience = parseAudience({
+      tags: searchParams.get("tags")?.split(",").map((t) => t.trim()).filter(Boolean) ?? [],
+      stage: searchParams.get("stage") || null,
+      inactiveDays: Number(searchParams.get("inactiveDays")) || null,
+    });
+    if (
+      audience.tags.length === 0 &&
+      !audience.stage &&
+      audience.inactiveDays == null
+    ) {
+      return NextResponse.json(
+        { error: "حدّد معيار استهداف واحداً على الأقل" },
+        { status: 400 }
+      );
+    }
+    const where = buildAudienceWhere(ctx.workspaceId, audience);
+    const [count, total] = await Promise.all([
+      prisma.contact.count({ where }),
+      prisma.contact.count({ where: { workspaceId: ctx.workspaceId } }),
+    ]);
+    return NextResponse.json({
+      count: Math.min(count, MAX_AUDIENCE + 1),
+      capped: count > MAX_AUDIENCE,
+      totalContacts: total,
+    });
+  }
 
   const campaigns = await prisma.broadcastCampaign.findMany({
     where: { workspaceId: ctx.workspaceId },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
-  return NextResponse.json({ campaigns });
+  const clicks = await prisma.broadcastClick.groupBy({
+    by: ["campaignId"],
+    _count: true,
+  });
+  const clickCountByCampaign = new Map(
+    clicks.map((c) => [c.campaignId, c._count])
+  );
+  return NextResponse.json({
+    campaigns: campaigns.map((c) => ({
+      ...c,
+      clickCount: clickCountByCampaign.get(c.id) ?? 0,
+    })),
+  });
 }
 
 // إنشاء حملة وإرسالها فوراً أو جدولتها لوقت مستقبلي
+// audience: استهداف مركّب {tags[], stage, inactiveDays} — معيار واحد على الأقل
+// tag (قديم): تسمية واحدة — تُحوَّل لـ audience {tags:[tag]} للتوافق الخلفي
+// linkUrl: رابط عرض — يُدرج مكان {{link}} في النص كرابط تتبّع لكل عميل
 // templateId: قالب معتمد في ميتا (متغيراته {{n}} تُقيم من params)
 // params: قيم المتغيرات على مستوى الحملة — تدعم {{name}} للتخصيص باسم كل عميل
 // scheduledAt: موعد الإرسال بصيغة ISO — غائب أو فارغ يعني الإرسال فوراً
@@ -33,19 +83,43 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const tag = body?.tag?.trim();
   const text = body?.body?.trim();
   const templateId = body?.templateId ?? null;
   const params: string[] = Array.isArray(body?.params)
     ? body.params.map((p: unknown) => String(p ?? ""))
     : [];
   const scheduledAtRaw = body?.scheduledAt?.trim?.() ?? "";
-  if (!tag || !text) {
+  if (!text) {
     return NextResponse.json(
-      { error: "التسمية ونص الرسالة مطلوبان" },
+      { error: "نص الرسالة مطلوب" },
       { status: 400 }
     );
   }
+
+  // الاستهداف: audience المركّب، أو tag الواحد القديم
+  let audience: BroadcastAudience;
+  if (body?.audience && typeof body.audience === "object") {
+    audience = parseAudience(body.audience);
+  } else {
+    const legacyTag = body?.tag?.trim?.() ?? "";
+    audience = { tags: legacyTag ? [legacyTag] : [], stage: null, inactiveDays: null };
+  }
+  if (
+    audience.tags.length === 0 &&
+    !audience.stage &&
+    audience.inactiveDays == null
+  ) {
+    return NextResponse.json(
+      { error: "حدّد معيار استهداف واحداً على الأقل: تسمية أو مرحلة أو خمول" },
+      { status: 400 }
+    );
+  }
+
+  // رابط العرض الاختياري: يُدرج مكان {{link}} كرابط تتبّع لكل عميل
+  const linkUrl: string | null =
+    typeof body?.linkUrl === "string" && body.linkUrl.trim()
+      ? body.linkUrl.trim()
+      : null;
 
   // التحقق من صلاحية موعد الجدولة إن أُعطي
   let scheduledAt: Date | null = null;
@@ -80,21 +154,22 @@ export async function POST(req: Request) {
     }
   }
 
-  // جمهور الحملة: جهات الاتصال الحاملة للتسمية
+  // جمهور الحملة بالشرط المركّب الموحّد
+  const audienceWhere = buildAudienceWhere(ctx.workspaceId, audience);
   const contacts = await prisma.contact.findMany({
-    where: { workspaceId: ctx.workspaceId, tags: { has: tag } },
+    where: audienceWhere,
     select: { id: true, waPhone: true },
     take: MAX_AUDIENCE + 1,
   });
   if (contacts.length === 0) {
     return NextResponse.json(
-      { error: `لا توجد جهات اتصال تحمل التسمية "${tag}"` },
+      { error: "لا توجد جهات اتصال تطابق معايير الاستهداف" },
       { status: 400 }
     );
   }
   if (contacts.length > MAX_AUDIENCE) {
     return NextResponse.json(
-      { error: `جمهور الحملة يتجاوز الحد الأقصى (${MAX_AUDIENCE}) — قسّمه لتسميات أصغر` },
+      { error: `جمهور الحملة يتجاوز الحد الأقصى (${MAX_AUDIENCE}) — اضبط المعايير لتضييقه` },
       { status: 400 }
     );
   }
@@ -116,7 +191,10 @@ export async function POST(req: Request) {
   const campaign = await prisma.broadcastCampaign.create({
     data: {
       workspaceId: ctx.workspaceId,
-      tag,
+      // التسمية المخزّنة = أول تسميات الاستهداف (مطلوبة — عمود NOT NULL للتوافق الخلفي)
+      tag: audience.tags[0] ?? "",
+      audience: JSON.stringify(audience),
+      linkUrl,
       body: text,
       templateId: template?.id ?? null,
       status: scheduledAt ? "QUEUED" : "SENDING",

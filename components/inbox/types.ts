@@ -33,6 +33,8 @@ export type ConversationListItem = {
   // وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
   tags: string[];
   notes: string | null;
+  // تقييم رضا العميل عن المحادثة (١-٥) إن قيّم
+  csatRating: number | null;
   // مزاج/نية العميل: INTERESTED | ANGRY | PRICE | NEUTRAL
   sentiment: string | null;
   // ملخص المحادثة المولّد بالذكاء الاصطناعي (إن وُجد)

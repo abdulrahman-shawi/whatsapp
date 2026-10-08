@@ -12,8 +12,6 @@ export const config = {
     "/inbox/:path*",
     "/broadcast/:path*",
     "/forms/:path*",
-    "/webhooks/:path*",
-    "/api-keys/:path*",
     "/audit/:path*",
     "/contacts/:path*",
     "/bookings/:path*",
@@ -21,8 +19,6 @@ export const config = {
     "/workflows/:path*",
     "/agents/:path*",
     "/widget/:path*",
-    "/usage/:path*",
-    "/billing/:path*",
     "/settings/:path*",
   ],
 };

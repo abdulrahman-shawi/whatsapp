@@ -1,6 +1,4 @@
-import { redirect } from "next/navigation";
 import { AlertTriangle, Bot, Hand, MessagesSquare, UserCheck } from "lucide-react";
-import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getUsageStatus } from "@/lib/billing/plans";
 import {
@@ -11,26 +9,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export const dynamic = "force-dynamic";
-
-// صفحة الاستهلاك: رصيد الرسائل الشهري وإحصاءات المحادثات
-export default async function UsagePage() {
-  const ctx = await getWorkspaceContext();
-  if (!ctx) redirect("/login");
-
+// قسم الاستهلاك داخل الإعدادات: رصيد الرسائل الشهري وإحصاءات المحادثات
+export async function UsageSection({ workspaceId }: { workspaceId: string }) {
   const [usageStatus, history, grouped] = await Promise.all([
     // الحد من الباقة الفعلية للمساحة
-    getUsageStatus(ctx.workspaceId),
+    getUsageStatus(workspaceId),
     // سجلات آخر ٦ أشهر إن وجدت
     prisma.usageRecord.findMany({
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId },
       orderBy: { month: "desc" },
       take: 6,
     }),
     // عدد المحادثات حسب الحالة
     prisma.conversation.groupBy({
       by: ["status"],
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId },
       _count: true,
     }),
   ]);
@@ -57,12 +50,9 @@ export default async function UsagePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">الاستهلاك</h1>
-        <p className="text-sm text-muted-foreground">
-          رصيد رسائلك الشهري وإحصاءات المحادثات
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        رصيد رسائلك الشهري وإحصاءات المحادثات
+      </p>
 
       {/* تنبيه الاقتراب من الحد */}
       {percent >= 80 && (

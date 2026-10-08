@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { PartyPopper, XCircle } from "lucide-react";
-import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
   ensurePlansSeeded,
@@ -11,8 +9,6 @@ import {
 import { stripeConfigured } from "@/lib/stripe";
 import { BillingClient } from "@/components/billing/billing-client";
 
-export const dynamic = "force-dynamic";
-
 // بريدات مالك المنصة من .env — مفصولة بفواصل
 function adminEmails(): string[] {
   return (process.env.PLATFORM_ADMIN_EMAILS ?? "")
@@ -21,23 +17,25 @@ function adminEmails(): string[] {
     .filter(Boolean);
 }
 
-// صفحة الاشتراك: الباقة الحالية والباقات المتاحة وطلب الترقية
-export default async function BillingPage({
-  searchParams,
+// قسم الاشتراك داخل الإعدادات: الباقة الحالية والباقات المتاحة وطلب الترقية
+export async function BillingSection({
+  workspaceId,
+  userId,
+  success,
+  canceled,
 }: {
-  searchParams: { success?: string; canceled?: string };
+  workspaceId: string;
+  userId: string;
+  success?: boolean;
+  canceled?: boolean;
 }) {
-  const ctx = await getWorkspaceContext();
-  if (!ctx) redirect("/login");
-  if (ctx.role !== "OWNER") redirect("/inbox");
-
   await ensurePlansSeeded();
   const [currentPlan, usage, plans, user] = await Promise.all([
-    getWorkspacePlan(ctx.workspaceId),
-    getUsageStatus(ctx.workspaceId),
+    getWorkspacePlan(workspaceId),
+    getUsageStatus(workspaceId),
     prisma.plan.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.user.findUnique({
-      where: { id: ctx.userId },
+      where: { id: userId },
       select: { email: true },
     }),
   ]);
@@ -45,31 +43,26 @@ export default async function BillingPage({
   const isAdmin = !!user && adminEmails().includes(user.email.toLowerCase());
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-bold">الاشتراك والباقات</h1>
-            <p className="text-sm text-muted-foreground">
-              باقتك الحالية وحدودها، والباقات المتاحة للترقية
-            </p>
-          </div>
-          <Link
-            href="/invoices"
-            className="text-sm text-primary underline-offset-4 hover:underline"
-          >
-            عرض الفواتير
-          </Link>
-        </div>
+    <div className="max-w-3xl space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          باقتك الحالية وحدودها، والباقات المتاحة للترقية
+        </p>
+        <Link
+          href="/invoices"
+          className="text-sm text-primary underline-offset-4 hover:underline"
+        >
+          عرض الفواتير
+        </Link>
       </div>
 
-      {searchParams.success === "1" && (
+      {success && (
         <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           <PartyPopper className="h-4 w-4 shrink-0" />
           تم تفعيل باقتك بنجاح 🎉
         </div>
       )}
-      {searchParams.canceled === "1" && (
+      {canceled && (
         <div className="flex items-center gap-2 rounded-lg border border-muted bg-accent/40 px-4 py-3 text-sm text-muted-foreground">
           <XCircle className="h-4 w-4 shrink-0" />
           تم إلغاء إتمام الدفع

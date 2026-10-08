@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, Bot, MessageSquareCode, Megaphone, Gauge, CreditCard, Settings, Workflow, BarChart3, Users, CalendarDays, ClipboardList, Webhook, ScrollText, KeyRound } from "lucide-react";
+import { Inbox, Bot, MessageSquareCode, Megaphone, Settings, Workflow, BarChart3, Users, CalendarDays, ClipboardList, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // روابط التنقل في الشريط الجانبي مع تمييز الصفحة الحالية
@@ -12,15 +12,11 @@ const navItems = [
   { href: "/bookings", label: "الحجوزات", icon: CalendarDays },
   { href: "/broadcast", label: "الحملات", icon: Megaphone, ownerOnly: true },
   { href: "/forms", label: "نماذج العملاء", icon: ClipboardList, ownerOnly: true },
-  { href: "/webhooks", label: "الويب هوكات", icon: Webhook, ownerOnly: true },
-  { href: "/api-keys", label: "مفاتيح API", icon: KeyRound, ownerOnly: true },
   { href: "/audit", label: "سجل التدقيق", icon: ScrollText, ownerOnly: true },
   { href: "/workflows", label: "سير العمل", icon: Workflow, ownerOnly: true },
   { href: "/agents", label: "الوكلاء", icon: Bot, ownerOnly: true },
   { href: "/widget", label: "الويدجت", icon: MessageSquareCode },
-  { href: "/usage", label: "الاستهلاك", icon: Gauge },
   { href: "/reports", label: "التقارير", icon: BarChart3 },
-  { href: "/billing", label: "الاشتراك", icon: CreditCard, ownerOnly: true },
   { href: "/settings", label: "الإعدادات", icon: Settings, ownerOnly: true },
 ];
 

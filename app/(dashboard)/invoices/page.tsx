@@ -36,7 +36,7 @@ export default async function InvoicesPage() {
           </p>
         </div>
         <Button variant="outline" asChild>
-          <Link href="/billing">
+          <Link href="/settings">
             <ArrowRight className="h-4 w-4" />
             العودة إلى الاشتراك
           </Link>

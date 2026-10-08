@@ -29,8 +29,8 @@ export default async function DashboardLayout({
   });
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-64 shrink-0 flex-col border-l bg-card p-4">
+    <div className="flex h-screen overflow-hidden">
+      <aside className="flex h-full w-64 shrink-0 flex-col overflow-y-auto border-l bg-card p-4">
         <div className="mb-6 px-2">
           <h1 className="text-lg font-bold text-primary">ردّ</h1>
           <p className="truncate text-sm text-muted-foreground">
@@ -48,7 +48,7 @@ export default async function DashboardLayout({
           <LogoutButton />
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-6">
+      <main className="min-w-0 flex-1 overflow-y-auto p-6">
         <div className="mb-4 flex items-center justify-end gap-1">
           <RemindersBell />
           <NotificationBell />

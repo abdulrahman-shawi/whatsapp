@@ -13,6 +13,7 @@ export const config = {
     "/broadcast/:path*",
     "/forms/:path*",
     "/webhooks/:path*",
+    "/api-keys/:path*",
     "/audit/:path*",
     "/contacts/:path*",
     "/bookings/:path*",

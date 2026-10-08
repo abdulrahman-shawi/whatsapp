@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 // حذف قالب من مساحة العمل
 export async function DELETE(
@@ -21,5 +22,11 @@ export async function DELETE(
   }
 
   await prisma.template.delete({ where: { id: params.id } });
+  // ويب هوك صادر: حذف القالب
+  fireOutboundEvent(ctx.workspaceId, "template.deleted", {
+    id: existing.id,
+    name: existing.name,
+    language: existing.language,
+  });
   return NextResponse.json({ ok: true });
 }

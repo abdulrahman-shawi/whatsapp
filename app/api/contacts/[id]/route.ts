@@ -4,6 +4,7 @@ import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isContactStage } from "@/lib/contact-stages";
 import { triggerWorkflows } from "@/lib/workflows";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 // تحديث بيانات جهة الاتصال: الاسم، الوسوم، الملاحظات
 export async function PATCH(
@@ -86,6 +87,13 @@ export async function PATCH(
       }
     ).catch(() => {});
   }
+
+  // ويب هوك صادر: تحديث بيانات العميل
+  fireOutboundEvent(ctx.workspaceId, "contact.updated", {
+    id: contact.id,
+    waPhone: contact.waPhone,
+    name: contact.name,
+  });
 
   return NextResponse.json({ contact });
 }

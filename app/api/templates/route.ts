@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 // قائمة قوالب رسائل واتساب لمساحة العمل
 export async function GET() {
@@ -40,6 +41,12 @@ export async function POST(req: Request) {
       language,
       body: bodyText,
     },
+  });
+  // ويب هوك صادر: قالب جديد
+  fireOutboundEvent(ctx.workspaceId, "template.created", {
+    id: template.id,
+    name: template.name,
+    language: template.language,
   });
   return NextResponse.json({ template }, { status: 201 });
 }

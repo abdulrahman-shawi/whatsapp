@@ -8,6 +8,7 @@ import {
 } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getStaffRestrictionFilter } from "@/lib/conversations";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 type Params = { params: { id: string } };
 
@@ -164,6 +165,16 @@ export async function POST(req: Request, { params }: Params) {
   await prisma.conversation.update({
     where: { id: params.id },
     data: { lastMessageAt: new Date() },
+  });
+
+  // ويب هوك صادر: رسالة صادرة مخزنة من الموظف — بما فيها الملاحظات الداخلية
+  fireOutboundEvent(ctx.workspaceId, "message.created", {
+    id: message.id,
+    direction: message.direction,
+    body: bodyText.length > 500 ? `${bodyText.slice(0, 500)}…` : bodyText,
+    from: conversation.contact.waPhone,
+    conversationId: params.id,
+    senderType: message.senderType,
   });
 
   // بث فوري عبر Pusher — لا يؤثر على شيء إن لم يكن مفعّلاً

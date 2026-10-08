@@ -228,6 +228,33 @@ model PushSubscription {
   createdAt DateTime @default(now())
 }
 
+// ويب هوك صادر: نرسل نحن الأحداث (رسالة جديدة، عميل جديد…) إلى رابط خارجي يختاره المستخدم
+model OutboundWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String    @default("")
+  url         String // وجهة الإرسال
+  events      String[]  @default([]) // الأحداث المشترك بها: message.created, contact.created…
+  secret      String? // سر توقيع HMAC في ترويسة X-Flovoo-Signature (اختياري)
+  isActive    Boolean   @default(true)
+  lastFiredAt DateTime?
+  lastStatus  Int? // آخر رمز استجابة HTTP
+  createdAt   DateTime  @default(now())
+}
+
+// مفتاح API للوصول البرمجي للقراءة — يُخزن هاشه فقط ويُعرض كاملاً لحظة الإنشاء
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  keyHash     String    @unique // sha256 للمفتاح الكامل
+  prefix      String // للعرض: آخر 10 أحرف مثلاً
+  scopes      String[]  @default(["read"]) // حالياً read فقط
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
 // دعوة انضمام لمرة واحدة: ينشئها المالك ويرسل الرابط للموظف
 model WorkspaceInvite {
   id          String      @id @default(cuid())

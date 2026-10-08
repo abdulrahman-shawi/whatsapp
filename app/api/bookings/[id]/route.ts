@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 type Params = { params: { id: string } };
 
@@ -27,6 +28,11 @@ export async function DELETE(_req: Request, { params }: Params) {
     entity: "booking",
     entityId: params.id,
     meta: { title: existing.title },
+  });
+  // ويب هوك صادر: حذف الحجز
+  fireOutboundEvent(ctx.workspaceId, "booking.deleted", {
+    id: existing.id,
+    title: existing.title,
   });
   return NextResponse.json({ ok: true });
 }

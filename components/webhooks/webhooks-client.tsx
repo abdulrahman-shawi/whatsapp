@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { relativeTime } from "@/lib/time";
+import {
+  OutboundWebhooksPanel,
+  type OutboundWebhookItem,
+} from "@/components/webhooks/outbound-webhooks-panel";
 
 type WebhookItem = {
   id: string;
@@ -23,15 +27,19 @@ const selectClass =
   "mt-1.5 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 // الويب هوك الوارد: إنشاء رابط استقبال عام وإدارته ونسخ رابطه
+// + الويب هوك الصادر: تسجيل روابط لاستقبال أحداث المنصة — عبر تبويبين
 export function WebhooksClient({
   initialWebhooks,
   workflows,
+  initialOutbound,
 }: {
   initialWebhooks: WebhookItem[];
   workflows: { id: string; name: string }[];
+  initialOutbound: OutboundWebhookItem[];
 }) {
   const [webhooks, setWebhooks] = useState<WebhookItem[]>(initialWebhooks);
   const [editing, setEditing] = useState<WebhookItem | "new" | null>(null);
+  const [tab, setTab] = useState<"inbound" | "outbound">("inbound");
 
   const [name, setName] = useState("");
   const [workflowId, setWorkflowId] = useState("");
@@ -151,6 +159,36 @@ export function WebhooksClient({
 
   return (
     <div className="space-y-6">
+      {/* تبويبا الويب هوك: وارد (استقبال من الخارج) / صادر (إرسال أحداث للخارج) */}
+      <div className="flex gap-1 border-b">
+        <button
+          type="button"
+          onClick={() => setTab("inbound")}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "inbound"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          وارد
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("outbound")}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "outbound"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          صادر
+        </button>
+      </div>
+
+      {tab === "outbound" ? (
+        <OutboundWebhooksPanel initialWebhooks={initialOutbound} />
+      ) : (
+        <>
       <div className="flex items-center justify-between">
         <h2 className="font-semibold">الويب هوك ({webhooks.length})</h2>
         <Button
@@ -319,6 +357,8 @@ export function WebhooksClient({
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );

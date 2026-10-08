@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { triggerConversationUpdated } from "@/lib/pusher";
 import { logAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 const STATUSES = ["AI", "MANUAL", "HANDED_OFF"] as const;
 
@@ -170,6 +171,10 @@ export async function PATCH(
         }).catch(() => {});
       }
     }
+    fireOutboundEvent(ctx.workspaceId, "conversation.assigned", {
+      conversationId: params.id,
+      assigneeIds,
+    });
   }
 
   // تدقيق الإغلاق/إعادة الفتح والأرشفة
@@ -181,6 +186,9 @@ export async function PATCH(
       entity: "conversation",
       entityId: params.id,
     });
+    fireOutboundEvent(ctx.workspaceId, "conversation.closed", {
+      conversationId: params.id,
+    });
   }
   if (body.closed === false && existing.closedAt) {
     await logAudit({
@@ -189,6 +197,9 @@ export async function PATCH(
       action: "REOPEN",
       entity: "conversation",
       entityId: params.id,
+    });
+    fireOutboundEvent(ctx.workspaceId, "conversation.reopened", {
+      conversationId: params.id,
     });
   }
   if (body.isArchived !== undefined && body.isArchived !== existing.isArchived) {

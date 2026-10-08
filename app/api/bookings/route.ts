@@ -3,6 +3,7 @@ import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dateTime } from "@/lib/time";
 import { notifyMembers } from "@/lib/notify";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 // GET: حجوزات مساحة العمل ضمن نطاق زمني — ?contactId= يحصرها لعميل واحد (لوحة جهة الاتصال)
 // ‎?from= &to= (ISO) للتقويم الشهري — الافتراضي: من الشهر الحالي ±شهر
@@ -87,5 +88,13 @@ export async function POST(req: Request) {
     body: `${title} — ${contact.name ?? waPhone} بموعد ${dateTime(scheduledAt)}`,
     link: "/bookings",
   }).catch(() => {});
+  // ويب هوك صادر: حجز جديد
+  fireOutboundEvent(ctx.workspaceId, "booking.created", {
+    id: booking.id,
+    title: booking.title,
+    scheduledAt: booking.scheduledAt.toISOString(),
+    contactId: contact.id,
+    waPhone,
+  });
   return NextResponse.json({ booking }, { status: 201 });
 }

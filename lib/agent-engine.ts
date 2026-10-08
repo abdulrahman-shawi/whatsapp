@@ -8,6 +8,7 @@ import { getUsageStatus } from "@/lib/billing/plans";
 import { triggerWorkflows } from "@/lib/workflows";
 import { detectLanguage, detectSentiment, LANGUAGE_NAMES } from "@/lib/sentiment";
 import { notifyUser } from "@/lib/notify";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -114,6 +115,13 @@ async function runPipeline(
         data: { workspaceId, waPhone, name: contactName },
       });
   const isNewContact = !existingContact;
+  if (isNewContact) {
+    fireOutboundEvent(workspaceId, "contact.created", {
+      id: contact.id,
+      waPhone,
+      name: contact.name,
+    });
+  }
 
   // ٣. إيجاد محادثة مفتوحة أو إنشاء واحدة جديدة
   let conversation = opts.conversationId
@@ -155,6 +163,15 @@ async function runPipeline(
         : {}),
     },
   });
+  // إطلاق ويب هوك صادر: رسالة واردة جديدة — لا يحجب المعالجة
+  fireOutboundEvent(workspaceId, "message.created", {
+    id: inboundMsg.id,
+    direction: inboundMsg.direction,
+    body: text.length > 500 ? `${text.slice(0, 500)}…` : text,
+    from: waPhone,
+    conversationId: conversation.id,
+  });
+
   // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
   // (إجابة تقييم الرضا وحدها لا تعيد الفتح)
   // + تحديث مزاج/نية العميل من نص رسالته (شارة الأولوية في الوارد)

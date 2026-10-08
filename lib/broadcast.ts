@@ -7,6 +7,7 @@ import {
 } from "@/lib/whatsapp";
 import { getUsageStatus } from "@/lib/billing/plans";
 import { isContactStage, type ContactStageValue } from "@/lib/contact-stages";
+import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
@@ -123,6 +124,15 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
       where: { id: campaign.id },
       data: { status: "FAILED", failedCount: campaign.totalCount, sentAt: new Date() },
     });
+    // ويب هوك صادر: فشل الحملة لنقص الرصيد
+    fireOutboundEvent(campaign.workspaceId, "broadcast.failed", {
+      id: campaign.id,
+      tag: campaign.tag,
+      totalCount: campaign.totalCount,
+      sentCount: 0,
+      failedCount: campaign.totalCount,
+      status: "FAILED",
+    });
     return;
   }
 
@@ -185,4 +195,17 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
     where: { id: campaign.id },
     data: { status, sentAt: new Date() },
   });
+  // ويب هوك صادر: اكتمال الحملة (أُرسلت كلياً/جزئياً) أو فشلها نهائياً
+  fireOutboundEvent(
+    campaign.workspaceId,
+    status === "FAILED" ? "broadcast.failed" : "broadcast.completed",
+    {
+      id: campaign.id,
+      tag: campaign.tag,
+      totalCount: campaign.totalCount,
+      sentCount: sent,
+      failedCount: failed,
+      status,
+    }
+  );
 }

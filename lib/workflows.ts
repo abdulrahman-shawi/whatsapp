@@ -71,7 +71,18 @@ export type WorkflowStep =
   | { type: "AI_CLASSIFY"; prompt: string; options: string[]; var: string } // تصنيف آخر رسالة بالذكاء الاصطناعي إلى خيار
   // شرط متعدد الفروع: يُنفذ أول فرع متحقق، وإلا فرع else (اختياري)
   // branches[0] يعادل if، branches[1..] تعادل else-if، وelseSteps تعادل else
-  | { type: "IF"; branches: IfBranch[]; elseSteps: WorkflowStep[] };
+  | { type: "IF"; branches: IfBranch[]; elseSteps: WorkflowStep[] }
+  // ساعات عمل محلية للخطوة: يُنفذ فرع التحقق إذا كان الوقت الحالي (بالمنطقة الزمنية
+  // المحددة) ضمن الأيام والساعات، وإلا فرع عدم التحقق — قد يتجاوز "إلى" منتصف الليل
+  | {
+      type: "BUSINESS_HOURS";
+      days: number[]; // 0=الأحد … 6=السبت (اتفاق JS getDay)
+      from: string; // "HH:mm" بنظام 24 ساعة
+      to: string; // "HH:mm" — قد يسبق from (شيفت ليلي)
+      timezone: string; // اسم IANA مثل "Asia/Damascus" أو "UTC"
+      successSteps: WorkflowStep[];
+      failureSteps: WorkflowStep[];
+    };
 
 // الشكل القديم لخطوة IF (شرط واحد ثم/else) — يُحوَّل تلقائياً عند التنفيذ والعرض
 type LegacyIfStep = {
@@ -106,6 +117,17 @@ export function normalizeSteps(steps: WorkflowStep[]): WorkflowStep[] {
         ...n,
         branches: n.branches.map((b) => ({ ...b, steps: normalizeSteps(b.steps) })),
         elseSteps: normalizeSteps(n.elseSteps),
+      };
+    }
+    if (n.type === "BUSINESS_HOURS") {
+      return {
+        ...n,
+        successSteps: normalizeSteps(
+          Array.isArray(n.successSteps) ? n.successSteps : []
+        ),
+        failureSteps: normalizeSteps(
+          Array.isArray(n.failureSteps) ? n.failureSteps : []
+        ),
       };
     }
     return n;
@@ -167,6 +189,7 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "UNARCHIVE", label: "إلغاء أرشفة المحادثة" },
   { type: "MARK_READ", label: "تعليم الرسائل مقروءة" },
   { type: "IF", label: "شرط (إذا / وإلا إذا / وإلا)" },
+  { type: "BUSINESS_HOURS", label: "ساعات العمل (شيفت)" },
 ] as const;
 
 const MAX_TOTAL_STEPS = 40;
@@ -181,6 +204,14 @@ function countSteps(steps: WorkflowStep[]): number {
         1 +
         s.branches.reduce((b, branch) => b + countSteps(branch.steps), 0) +
         countSteps(s.elseSteps)
+      );
+    }
+    if (s.type === "BUSINESS_HOURS") {
+      return (
+        sum +
+        1 +
+        countSteps(Array.isArray(s.successSteps) ? s.successSteps : []) +
+        countSteps(Array.isArray(s.failureSteps) ? s.failureSteps : [])
       );
     }
     return sum + 1;
@@ -417,6 +448,46 @@ export function validateSteps(
           }
           break;
         }
+        case "BUSINESS_HOURS": {
+          if (depth >= MAX_DEPTH) {
+            errors.push(`${label}: الحد الأقصى ${MAX_DEPTH} مستويات تداخل للشروط`);
+            break;
+          }
+          const days = Array.isArray(step.days) ? step.days : [];
+          if (
+            days.length === 0 ||
+            !days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+          ) {
+            errors.push(`${label}: اختر يوماً واحداً على الأقل (0-6)`);
+          }
+          const validTime = (v: unknown) =>
+            typeof v === "string" &&
+            /^\d{2}:\d{2}$/.test(v) &&
+            Number(v.slice(0, 2)) < 24 &&
+            Number(v.slice(3, 5)) < 60;
+          if (!validTime(step.from) || !validTime(step.to)) {
+            errors.push(`${label}: وقت البداية والنهاية بصيغة HH:mm صالحة`);
+          }
+          if (
+            typeof step.timezone !== "string" ||
+            !step.timezone.trim() ||
+            step.timezone.trim().length > 64
+          ) {
+            errors.push(`${label}: المنطقة الزمنية مطلوبة (٦٤ حرفاً كحد أقصى)`);
+          }
+          const successSteps = Array.isArray(step.successSteps)
+            ? step.successSteps
+            : [];
+          const failureSteps = Array.isArray(step.failureSteps)
+            ? step.failureSteps
+            : [];
+          walk(successSteps, depth + 1, `${label}←عند التحقق:`);
+          walk(failureSteps, depth + 1, `${label}←عند عدم التحقق:`);
+          if (successSteps.length === 0 && failureSteps.length === 0) {
+            errors.push(`${label}: أضف خطوة في أحد الفرعين على الأقل`);
+          }
+          break;
+        }
         default:
           break;
       }
@@ -619,6 +690,48 @@ async function isBusinessHours(workspaceId: string): Promise<boolean> {
   const e = parseInt(end ?? "17", 10);
   const h = now.getHours();
   return h >= s && h < e;
+}
+
+// "HH:mm" → دقائق من منتصف الليل
+function hhmmToMinutes(v: string): number {
+  const [h, m] = String(v ?? "00:00")
+    .split(":")
+    .map((n) => parseInt(n, 10));
+  return (h || 0) * 60 + (m || 0);
+}
+
+// اليوم (0-6) والدقائق من منتصف الليل للوقت الحالي في منطقة زمنية معيّنة
+// يعيد null عند تعذّر التنسيق (منطقة زمنية غير صالحة)
+function nowInTimezone(
+  timezone: string
+): { day: number; minutes: number } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const part = (type: string) =>
+      parts.find((p) => p.type === type)?.value ?? "";
+    const dayByName: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    const day = dayByName[part("weekday")];
+    const hh = parseInt(part("hour"), 10);
+    const mm = parseInt(part("minute"), 10);
+    if (day === undefined || isNaN(hh) || isNaN(mm)) return null;
+    return { day, minutes: hh * 60 + mm };
+  } catch {
+    return null;
+  }
 }
 
 // تقييم شرط IF — يقرأ حالة العميل والوسوم وقت التنفيذ
@@ -1171,6 +1284,36 @@ export async function executeWorkflow(
       if (matched < 0 && multi.elseSteps.length === 0) {
         logs.push("↳ IF → لا فرع متحقق ولا else — تُخطّى");
       }
+      continue;
+    }
+
+    if (step.type === "BUSINESS_HOURS") {
+      // الوقت الحالي بالمنطقة الزمنية المحددة — منطقة غير صالحة: تحذير والرجوع لـ UTC
+      let now = nowInTimezone(step.timezone);
+      if (!now) {
+        logs.push(
+          `↳ ساعات العمل: المنطقة الزمنية "${step.timezone}" غير صالحة — يُستخدم UTC`
+        );
+        now = nowInTimezone("UTC")!;
+      }
+      const fromMin = hhmmToMinutes(step.from);
+      const toMin = hhmmToMinutes(step.to);
+      const dayOk = (step.days ?? []).includes(now.day);
+      // النهاية قبل البداية = شيفت ليلي يعبر منتصف الليل
+      const timeOk =
+        fromMin <= toMin
+          ? now.minutes >= fromMin && now.minutes < toMin
+          : now.minutes >= fromMin || now.minutes < toMin;
+      const match = dayOk && timeOk;
+      logs.push(`↳ ساعات العمل: ${match ? "داخل" : "خارج"} ساعات العمل`);
+      const branchSteps = match
+        ? Array.isArray(step.successSteps)
+          ? step.successSteps
+          : []
+        : Array.isArray(step.failureSteps)
+          ? step.failureSteps
+          : [];
+      if (branchSteps.length > 0) stack.push({ steps: branchSteps, index: 0 });
       continue;
     }
 

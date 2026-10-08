@@ -45,6 +45,7 @@ export const WORKFLOW_STEP_LABELS: Record<string, string> = {
   UNARCHIVE: "إلغاء أرشفة المحادثة",
   MARK_READ: "تعليم الرسائل مقروءة",
   IF: "شرط (إذا / وإلا)",
+  BUSINESS_HOURS: "ساعات العمل (شيفت)",
 };
 
 const MAX_TOTAL_STEPS = 40;
@@ -84,6 +85,14 @@ function stripIdsInList(list: unknown[]): unknown[] {
       if (Array.isArray(out.elseSteps)) out.elseSteps = stripIdsInList(out.elseSteps);
       if (Array.isArray(out.then)) out.then = stripIdsInList(out.then);
       if (Array.isArray(out["else"])) out["else"] = stripIdsInList(out["else"]);
+    }
+    if (out.type === "BUSINESS_HOURS") {
+      out.successSteps = stripIdsInList(
+        Array.isArray(out.successSteps) ? out.successSteps : []
+      );
+      out.failureSteps = stripIdsInList(
+        Array.isArray(out.failureSteps) ? out.failureSteps : []
+      );
     }
     return out;
   });
@@ -284,6 +293,11 @@ function countSteps(list: unknown[]): number {
           0
         ) +
         (Array.isArray(s.elseSteps) ? countSteps(s.elseSteps) : 0);
+    } else if (isObj(s) && s.type === "BUSINESS_HOURS") {
+      total +=
+        1 +
+        (Array.isArray(s.successSteps) ? countSteps(s.successSteps) : 0) +
+        (Array.isArray(s.failureSteps) ? countSteps(s.failureSteps) : 0);
     } else {
       total += 1;
     }
@@ -450,6 +464,51 @@ function validateAndNormalizeSteps(
           out.push({ type: "IF", branches: newBranches, elseSteps: newElse });
           continue;
         }
+        case "BUSINESS_HOURS": {
+          if (depth >= MAX_DEPTH) {
+            errors.push(`${label}: الحد الأقصى ${MAX_DEPTH} مستويات تداخل للشروط`);
+            break;
+          }
+          const days = Array.isArray(step.days) ? step.days : [];
+          if (
+            days.length === 0 ||
+            !days.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)
+          ) {
+            errors.push(`${label}: اختر يوماً واحداً على الأقل (0-6)`);
+          }
+          const validTime = (v: unknown) =>
+            typeof v === "string" &&
+            /^\d{2}:\d{2}$/.test(v) &&
+            Number(v.slice(0, 2)) < 24 &&
+            Number(v.slice(3, 5)) < 60;
+          if (!validTime(step.from) || !validTime(step.to)) {
+            errors.push(`${label}: وقت البداية والنهاية بصيغة HH:mm صالحة`);
+          }
+          if (
+            typeof step.timezone !== "string" ||
+            !step.timezone.trim() ||
+            step.timezone.trim().length > 64
+          ) {
+            errors.push(`${label}: المنطقة الزمنية مطلوبة (٦٤ حرفاً كحد أقصى)`);
+          }
+          const successSteps = Array.isArray(step.successSteps) ? step.successSteps : [];
+          const failureSteps = Array.isArray(step.failureSteps) ? step.failureSteps : [];
+          const newSuccess = walk(successSteps, depth + 1, `${label}←عند التحقق:`) ?? [];
+          const newFailure = walk(failureSteps, depth + 1, `${label}←عند عدم التحقق:`) ?? [];
+          if (successSteps.length === 0 && failureSteps.length === 0) {
+            errors.push(`${label}: أضف خطوة في أحد الفرعين على الأقل`);
+          }
+          out.push({
+            type: "BUSINESS_HOURS",
+            days,
+            from: step.from,
+            to: step.to,
+            timezone: step.timezone,
+            successSteps: newSuccess,
+            failureSteps: newFailure,
+          });
+          continue;
+        }
         default:
           break;
       }
@@ -527,6 +586,13 @@ export function stepPreview(step: unknown): string {
       return `${label}: ${String(step.stage ?? "")}`;
     case "IF":
       return `${label} (${Array.isArray(step.branches) ? step.branches.length : 1} فرع)`;
+    case "BUSINESS_HOURS": {
+      const days = Array.isArray(step.days) ? ([...step.days] as number[]).sort((a, b) => a - b) : [];
+      const from = typeof step.from === "string" ? step.from : "—";
+      const to = typeof step.to === "string" ? step.to : "—";
+      const daysText = days.length > 0 ? days.join("-") : "—";
+      return `ساعات العمل: ${daysText} ${from}-${to}`;
+    }
     default:
       return label;
   }

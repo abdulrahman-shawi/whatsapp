@@ -102,6 +102,21 @@ const CONVERSATION_STATUS_LABELS: Record<string, string> = {
   HANDED_OFF: "تم التسليم",
 };
 
+// المناطق الزمنية المتاحة في خطوة ساعات العمل — select فقط لتفادي المناطق غير الصالحة
+const TIMEZONES: { value: string; label: string; short: string }[] = [
+  { value: "Asia/Damascus", label: "دمشق (Asia/Damascus)", short: "دمشق" },
+  { value: "Asia/Riyadh", label: "الرياض (Asia/Riyadh)", short: "الرياض" },
+  { value: "Asia/Dubai", label: "دبي (Asia/Dubai)", short: "دبي" },
+  { value: "Asia/Amman", label: "عمّان (Asia/Amman)", short: "عمّان" },
+  { value: "Asia/Beirut", label: "بيروت (Asia/Beirut)", short: "بيروت" },
+  { value: "Asia/Baghdad", label: "بغداد (Asia/Baghdad)", short: "بغداد" },
+  { value: "Africa/Cairo", label: "القاهرة (Africa/Cairo)", short: "القاهرة" },
+  { value: "Europe/Istanbul", label: "إسطنبول (Europe/Istanbul)", short: "إسطنبول" },
+  { value: "Europe/London", label: "لندن (Europe/London)", short: "لندن" },
+  { value: "America/New_York", label: "نيويورك (America/New_York)", short: "نيويورك" },
+  { value: "UTC", label: "UTC", short: "UTC" },
+];
+
 function dayLabel(value: number): string {
   return WEEK_DAYS.find((d) => d.value === value)?.label ?? String(value);
 }
@@ -157,6 +172,7 @@ const STEP_TYPES: {
   { type: "WEBHOOK", label: "Webhook", description: "إرسال بيانات العميل إلى رابط خارجي", icon: Webhook, color: "#0ea5e9" },
   { type: "GOTO", label: "انتقال إلى خطوة", description: "بعد تنفيذها يقفز سير العمل فوراً إلى الخطوة التي تختارها — يظهر سهم بنفسجي يربطهما على اللوحة. للأمام فقط لمنع التكرار اللانهائي", icon: CornerUpRight, color: "#6366f1" },
   { type: "IF", label: "شرط (إذا)", description: "تفرع الخطوات حسب شرط محدد", icon: GitBranch, color: "#d946ef" },
+  { type: "BUSINESS_HOURS", label: "ساعات العمل (شيفت)", description: "يتحقق من الوقت الحالي بالمنطقة الزمنية المحددة — فرعان: عند التحقق وعند عدم التحقق", icon: Clock, color: "#0d9488" },
 ];
 
 function stepMeta(type: string) {
@@ -216,6 +232,16 @@ function emptyStepBase(type: string): Step {
           },
         ],
         elseSteps: [],
+      };
+    case "BUSINESS_HOURS":
+      return {
+        type,
+        days: [0, 1, 2, 3, 4], // الأحد-الخميس
+        from: "09:00",
+        to: "17:00",
+        timezone: "Asia/Damascus",
+        successSteps: [],
+        failureSteps: [],
       };
     default:
       return { type };
@@ -309,6 +335,17 @@ function normalizeStepsShape(steps: Step[]): Step[] {
   return steps.map((raw) => {
     const step: Step =
       typeof raw.id === "string" && raw.id ? raw : { ...raw, id: crypto.randomUUID() };
+    if (step.type === "BUSINESS_HOURS") {
+      return {
+        ...step,
+        successSteps: normalizeStepsShape(
+          Array.isArray(step.successSteps) ? (step.successSteps as Step[]) : []
+        ),
+        failureSteps: normalizeStepsShape(
+          Array.isArray(step.failureSteps) ? (step.failureSteps as Step[]) : []
+        ),
+      };
+    }
     if (step.type !== "IF") return step;
     if (Array.isArray(step.branches)) {
       return {
@@ -418,6 +455,17 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
         n === 1 ? "فرع واحد" : n === 2 ? "فرعان" : `${n} فروع`;
       return `${nText}${hasElse ? " + وإلا" : " بدون وإلا"}`;
     }
+    case "BUSINESS_HOURS": {
+      const days = Array.isArray(step.days) ? ([...step.days] as number[]).sort((a, b) => a - b) : [];
+      const daysText =
+        days.join(",") === "0,1,2,3,4"
+          ? "الأحد-الخميس"
+          : days.map(dayLabel).join("، ") || "—";
+      const tz =
+        TIMEZONES.find((t) => t.value === step.timezone)?.short ??
+        ((step.timezone as string) || "—");
+      return `${daysText} · ${(step.from as string) ?? "—"}-${(step.to as string) ?? "—"} · ${tz}`;
+    }
     default:
       return "";
   }
@@ -485,10 +533,15 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   }
 
   function branchCountOf(step: Step): number {
+    if (step.type === "BUSINESS_HOURS") return 2; // successSteps + failureSteps
     return Array.isArray(step.branches) ? (step.branches as unknown[]).length : 0;
   }
 
   function branchListOf(step: Step, b: number): Step[] {
+    if (step.type === "BUSINESS_HOURS") {
+      const key = b === 0 ? "successSteps" : "failureSteps";
+      return Array.isArray(step[key]) ? (step[key] as Step[]) : [];
+    }
     if (b < branchCountOf(step)) {
       const branch = (step.branches as IfBranchShape[])[b];
       return Array.isArray(branch?.steps) ? (branch.steps as Step[]) : [];
@@ -497,6 +550,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   }
 
   function replaceBranchList(step: Step, b: number, list: Step[]): Step {
+    if (step.type === "BUSINESS_HOURS") {
+      return b === 0 ? { ...step, successSteps: list } : { ...step, failureSteps: list };
+    }
     if (b < branchCountOf(step)) {
       return {
         ...step,
@@ -726,9 +782,9 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         );
       }
       list.forEach((s, i) => {
-        if (s.type !== "IF") return;
+        if (s.type !== "IF" && s.type !== "BUSINESS_HOURS") return;
         const count = branchCountOf(s);
-        const elseOn = Array.isArray(s.elseSteps);
+        const elseOn = s.type === "IF" && Array.isArray(s.elseSteps);
         const total = count + (elseOn ? 1 : 0);
         const ifEl = cardEl([...listPath, i]);
         const nextEl = i + 1 < list.length ? cardEl([...listPath, i + 1]) : undefined;
@@ -752,10 +808,10 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
     function walkGotos(listPath: number[]) {
       const list = getListAtPath(steps, listPath);
       list.forEach((s, i) => {
-        if (s.type === "IF") {
+        if (s.type === "IF" || s.type === "BUSINESS_HOURS") {
           const count = branchCountOf(s);
           for (let b = 0; b < count; b++) walkGotos([...listPath, i, b]);
-          if (Array.isArray(s.elseSteps)) walkGotos([...listPath, i, count]);
+          if (s.type === "IF" && Array.isArray(s.elseSteps)) walkGotos([...listPath, i, count]);
         }
         const targetId = s.targetId as string | undefined;
         if (s.type === "GOTO" && typeof targetId === "string" && targetId) {
@@ -1524,6 +1580,82 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               </div>
             );
           })()}
+        {step.type === "BUSINESS_HOURS" &&
+          (() => {
+            const days = Array.isArray(step.days) ? (step.days as number[]) : [];
+            const toggleDay = (value: number) =>
+              update({
+                days: days.includes(value)
+                  ? days.filter((d) => d !== value)
+                  : [...days, value],
+              });
+            return (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">أيام العمل</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {WEEK_DAYS.map((d) => (
+                      <button
+                        key={d.value}
+                        type="button"
+                        onClick={() => toggleDay(d.value)}
+                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                          days.includes(d.value)
+                            ? "border-primary bg-accent font-medium"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">من وقت</Label>
+                    <Input
+                      type="time"
+                      value={(step.from as string) ?? "09:00"}
+                      onChange={(e) => update({ from: e.target.value })}
+                      className="w-32"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">إلى وقت</Label>
+                    <Input
+                      type="time"
+                      value={(step.to as string) ?? "17:00"}
+                      onChange={(e) => update({ to: e.target.value })}
+                      className="w-32"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  إذا كان وقت النهاية قبل البداية يُعامَل كشيفت ليلي يعبر منتصف الليل
+                </p>
+                <div className="space-y-1">
+                  <Label className="text-xs">المنطقة الزمنية</Label>
+                  <select
+                    value={(step.timezone as string) ?? "Asia/Damascus"}
+                    onChange={(e) => update({ timezone: e.target.value })}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                  >
+                    {TIMEZONES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  عدّل خطوات الفرعين (عند التحقق / عند عدم التحقق) مباشرةً على اللوحة
+                  أسفل بطاقة الخطوة.
+                </p>
+              </div>
+            );
+          })()}
         {(step.type === "AI_REPLY" || step.type === "CLOSE" || step.type === "STOP_AI") && (
           <p className="text-xs text-muted-foreground">
             {step.type === "AI_REPLY"
@@ -1716,6 +1848,20 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                     </div>
                   );
                 })()}
+              {step.type === "BUSINESS_HOURS" && (
+                <div className="flex w-full min-w-max flex-row items-start justify-center gap-4">
+                  <BranchColumn
+                    listPath={[...listPath, i, 0]}
+                    title="عند التحقق ✓"
+                    tone="green"
+                  />
+                  <BranchColumn
+                    listPath={[...listPath, i, 1]}
+                    title="عند عدم التحقق ✗"
+                    tone="red"
+                  />
+                </div>
+              )}
             </div>
           );
         })}

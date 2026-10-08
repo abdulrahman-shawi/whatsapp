@@ -324,6 +324,7 @@ model Contact {
   notes        String?
   stage        ContactStage      @default(NEW) // مرحلة العميل في مسار البيع
   tags         String[]
+  blocked      Boolean        @default(false) // محظور — تتجاهل رسائله الواردة ولا تصله ردود آليّة
   createdAt    DateTime       @default(now())
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   conversations Conversation[]

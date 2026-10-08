@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Archive,
   ArchiveRestore,
+  Ban,
   BookOpen,
   Bot,
   CalendarPlus,
@@ -160,6 +161,8 @@ const STEP_TYPES: {
   { type: "STOP_AI", label: "إيقاف الرد الآلي", description: "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها", icon: UserCheck, color: "#e11d48" },
   { type: "REOPEN", label: "إعادة فتح المحادثة", description: "إعادة فتح محادثة مغلقة", icon: RotateCcw, color: "#22c55e" },
   { type: "CLOSE", label: "إغلاق المحادثة", description: "إغلاق المحادثة وإخفاءها من الوارد", icon: CheckCheck, color: "#64748b" },
+  { type: "DELETE_CONVERSATION", label: "حذف المحادثة", description: "حذف المحادثة الحالية نهائياً من قاعدة البيانات مع كل رسائلها", icon: Trash2, color: "#dc2626" },
+  { type: "BLOCK_CONTACT", label: "حظر المستخدم", description: "حظر جهة الاتصال — تتجاهل رسائلها الواردة ولا تصلها أي رسائل مستقبلاً", icon: Ban, color: "#b91c1c" },
   { type: "CREATE_BOOKING", label: "إنشاء حجز", description: "حجز موعد جديد مع العميل", icon: CalendarPlus, color: "#0ea5e9" },
   { type: "RESUME_AI", label: "إعادة تفعيل الرد الآلي", description: "عكس إيقاف الرد الآلي — يعيد رد الوكيل", icon: Play, color: "#84cc16" },
   { type: "ARCHIVE", label: "أرشفة المحادثة", description: "نقل المحادثة للأرشيف", icon: Archive, color: "#78716c" },
@@ -418,6 +421,10 @@ function stepSummary(step: Step, members: { id: string; name: string }[], templa
       return dbSources.find((d) => d.id === step.sourceId)?.title ?? "—";
     case "CLOSE":
       return "تُغلق المحادثة وتختفي من الوارد";
+    case "DELETE_CONVERSATION":
+      return "حذف نهائي للمحادثة وكل رسائلها";
+    case "BLOCK_CONTACT":
+      return "يُحظر العميل — لا رسائل له مستقبلاً";
     case "REOPEN":
       return "إعادة فتح المحادثة";
     case "CREATE_BOOKING":
@@ -1663,6 +1670,13 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               : step.type === "STOP_AI"
                 ? "يحوّل المحادثة للتحكم البشري — لا يردّ الوكيل بعدها"
                 : "تُغلق المحادثة وتختفي من الوارد"}
+          </p>
+        )}
+        {(step.type === "DELETE_CONVERSATION" || step.type === "BLOCK_CONTACT") && (
+          <p className="text-xs text-muted-foreground">
+            {step.type === "DELETE_CONVERSATION"
+              ? "تُحذف المحادثة الحالية نهائياً من قاعدة البيانات مع كل رسائلها — لا يمكن التراجع"
+              : "يُحظر العميل — تتجاهل رسائله الواردة ولا يصله أي رد آلي أو رسائل مستقبلاً"}
           </p>
         )}
         {(step.type === "REOPEN" || step.type === "SEARCH_KNOWLEDGE") && (

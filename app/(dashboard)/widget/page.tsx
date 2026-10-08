@@ -13,8 +13,25 @@ export default async function WidgetPage() {
   const agents = await prisma.agent.findMany({
     where: { workspaceId: ctx.workspaceId, isActive: true },
     orderBy: { createdAt: "desc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, welcomeMessage: true },
   });
+
+  // إعدادات مظهر الويدجت لكل وكيل — مفتاحها widget:<agentId> وقيمتها JSON
+  const widgetRows = await prisma.setting.findMany({
+    where: { workspaceId: ctx.workspaceId, key: { startsWith: "widget:" } },
+  });
+  const configByAgent = new Map<string, { title?: string; subtitle?: string; color?: string }>();
+  for (const row of widgetRows) {
+    try {
+      configByAgent.set(row.key.slice("widget:".length), JSON.parse(row.value));
+    } catch {
+      /* قيمة تالفة — نتجاهلها */
+    }
+  }
+  const agentsWithConfig = agents.map((a) => ({
+    ...a,
+    widget: configByAgent.get(a.id) ?? null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -24,7 +41,7 @@ export default async function WidgetPage() {
           أضف محادثة ذكية إلى موقعك بسطر واحد من الكود
         </p>
       </div>
-      <WidgetSettings agents={agents} />
+      <WidgetSettings agents={agentsWithConfig} />
     </div>
   );
 }

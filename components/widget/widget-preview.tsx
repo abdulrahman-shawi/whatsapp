@@ -8,8 +8,21 @@ import { cn } from "@/lib/utils";
 
 type PreviewMsg = { role: "visitor" | "agent" | "system"; body: string };
 
+// إعدادات المظهر المعروضة في المعاينة — تُمرَّر من لوحة الإعدادات
+export type WidgetPreviewConfig = {
+  title: string;
+  subtitle: string;
+  color: string;
+};
+
 // معاينة حية للويدجت: تتحدث مع الواجهة الحقيقية /api/widget
-export function WidgetPreview({ agentId }: { agentId: string }) {
+export function WidgetPreview({
+  agentId,
+  config,
+}: {
+  agentId: string;
+  config?: WidgetPreviewConfig;
+}) {
   const [messages, setMessages] = useState<PreviewMsg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -126,8 +139,20 @@ export function WidgetPreview({ agentId }: { agentId: string }) {
 
   return (
     <div className="mx-auto flex h-[420px] w-full max-w-sm flex-col overflow-hidden rounded-xl border bg-card shadow">
-      <div className="bg-primary px-4 py-3 text-sm font-bold text-primary-foreground">
-        تحدث معنا
+      <div
+        className="px-4 py-3 text-sm font-bold text-primary-foreground"
+        style={
+          /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(config?.color ?? "")
+            ? { backgroundColor: config!.color }
+            : undefined
+        }
+      >
+        <div>{config?.title.trim() || "تحدث معنا"}</div>
+        {config?.subtitle.trim() && (
+          <div className="mt-0.5 text-xs font-normal opacity-90">
+            {config.subtitle}
+          </div>
+        )}
       </div>
       <div
         ref={scrollRef}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History, Star } from "lucide-react";
+import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History, Star, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,8 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
     { id: string; title: string; scheduledAt: string; notes: string | null }[]
   >([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  // سجل النشاط مخفي افتراضياً ويُعرض بالضغط على العنوان
+  const [showActivity, setShowActivity] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,11 +300,22 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
 
       {/* سجل النشاط — خط زمني للرسائل والحجوزات */}
       <div className="space-y-2">
-        <Label className="flex items-center gap-1">
-          <History className="h-3.5 w-3.5" />
-          سجل النشاط
-        </Label>
-        {activity.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowActivity((v) => !v)}
+          className="flex w-full items-center justify-between rounded-md px-1 py-1 text-start hover:bg-muted/50"
+          aria-expanded={showActivity}
+        >
+          <Label className="flex cursor-pointer items-center gap-1">
+            <History className="h-3.5 w-3.5" />
+            سجل النشاط
+          </Label>
+          <ChevronDown
+            className={`h-4 w-4 text-muted-foreground transition-transform ${showActivity ? "rotate-180" : ""}`}
+          />
+        </button>
+        {showActivity &&
+          (activity.length === 0 ? (
           <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
             لا يوجد نشاط مسجل بعد
           </p>
@@ -345,7 +358,7 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
               </div>
             ))}
           </div>
-        )}
+          ))}
       </div>
     </div>
   );

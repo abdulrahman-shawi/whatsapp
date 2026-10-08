@@ -58,6 +58,7 @@ export type WorkflowStep =
   | { type: "QUERY_DB"; sourceId: string } // استعلام مصدر DB — النتيجة في {{db}}
   | { type: "CLOSE" }
   | { type: "REOPEN" } // إعادة فتح محادثة مغلقة
+  | { type: "DELETE_CONVERSATION" } // حذف المحادثة الحالية نهائياً مع رسائلها (Cascade)
   | { type: "WAIT"; minutes: number }
   | { type: "WEBHOOK"; url: string }
   | { type: "GOTO"; targetId?: string; step?: number } // انتقال مرسوم بسهم إلى خطوة في نفس المستوى (للأمام فقط)
@@ -65,6 +66,7 @@ export type WorkflowStep =
   | { type: "RESUME_AI" } // إعادة تفعيل الرد الآلي للمحادثة (عكس STOP_AI)
   | { type: "ARCHIVE" } // أرشفة المحادثة
   | { type: "UNARCHIVE" } // إلغاء أرشفة المحادثة
+  | { type: "BLOCK_CONTACT" } // حظر جهة الاتصال — تتجاهل رسائلها ولا تصلها ردود مستقبلاً
   | { type: "MARK_READ" } // تعليم رسائل المحادثة مقروءة
   | { type: "SET_VAR"; name: string; value: string } // تعيين متغير — يُستخدم في VAR_EQUALS و{{var:الاسم}}
   | { type: "HTTP_REQUEST"; url: string; method: "GET" | "POST"; body?: string } // طلب عام — النتيجة في {{http}}
@@ -176,6 +178,8 @@ export const WORKFLOW_STEP_TYPES = [
   { type: "QUERY_DB", label: "استعلام قاعدة بيانات" },
   { type: "STOP_AI", label: "إيقاف الرد الآلي" },
   { type: "CLOSE", label: "إغلاق المحادثة" },
+  { type: "DELETE_CONVERSATION", label: "حذف المحادثة" },
+  { type: "BLOCK_CONTACT", label: "حظر المستخدم" },
   { type: "REOPEN", label: "إعادة فتح المحادثة" },
   { type: "WAIT", label: "انتظار (تأخير)" },
   { type: "WEBHOOK", label: "Webhook خارجي" },
@@ -1057,6 +1061,22 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       });
       return "أُغلقت المحادثة";
     }
+    case "DELETE_CONVERSATION": {
+      if (!ctx.conversationId) throw new Error("لا توجد محادثة لحذفها");
+      // الرسائل والإسنادات والرسائل المجدولة مرتبطة بـ Cascade — يكفي حذف المحادثة
+      await prisma.conversation.delete({
+        where: { id: ctx.conversationId },
+      });
+      // المحادثة لم تعد موجودة — الخطوات التالية التي تحتاجها تفشل برسالة واضحة
+      ctx.conversationId = undefined;
+      return "حُذفت المحادثة نهائياً مع رسائلها";
+    }
+    case "BLOCK_CONTACT":
+      await prisma.contact.update({
+        where: { id: ctx.contactId },
+        data: { blocked: true },
+      });
+      return "حُظر العميل — لن تصله رسائل مستقبلاً";
     case "REOPEN": {
       if (!ctx.conversationId) throw new Error("لا توجد محادثة");
       await prisma.conversation.update({

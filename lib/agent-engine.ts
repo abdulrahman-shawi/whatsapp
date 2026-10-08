@@ -485,6 +485,16 @@ export async function handleIncomingWhatsAppMessage(input: {
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
 }): Promise<void> {
   try {
+    // رقم محظور — نتجاهل الرسالة تماماً: لا محادثة جديدة ولا رد آلي
+    const blockedContact = await prisma.contact.findFirst({
+      where: { waPhone: input.waPhone, blocked: true },
+      select: { id: true },
+    });
+    if (blockedContact) {
+      console.log(`[agent-engine] رسالة من رقم محظور (${input.waPhone}) — تم التجاهل`);
+      return;
+    }
+
     // Multi-tenant: نبحث عن الوكيل النشط داخل مساحة العمل المالكة للرقم،
     // وعند غيابها نعود لأول وكيل نشط (سلوك احتياطي قديم)
     const agent = input.workspaceId

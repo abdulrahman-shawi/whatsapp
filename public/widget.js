@@ -1,6 +1,8 @@
 /*!
  * ويدجت المحادثة — سكربت مستقل يعمل على أي موقع دون أي مكتبات
  * الاستخدام: <script src="https://<domain>/widget.js" data-agent-id="<id>" async></script>
+ * تخصيص اختياري عبر خصائص في وسم السكربت: data-title وdata-subtitle وdata-color (بصيغة #hex)
+ * الأسبقية: خاصية data-* ثم إعدادات لوحة الويدجت ثم القيم الافتراضية
  */
 (function () {
   "use strict";
@@ -12,6 +14,19 @@
   var AGENT_ID = scriptTag.getAttribute("data-agent-id");
   var API_BASE = new URL(scriptTag.src).origin;
   if (!AGENT_ID) return;
+
+  // التخصيص الممرر مباشرة في وسم السكربت — يتغلب على إعدادات الخادم
+  var attrTitle = scriptTag.getAttribute("data-title");
+  var attrSubtitle = scriptTag.getAttribute("data-subtitle");
+  var attrColor = scriptTag.getAttribute("data-color");
+
+  // قبول الألوان الصالحة فقط (#rgb أو #rrggbb) حمايةً من حقن CSS
+  function validColor(c) {
+    return (
+      typeof c === "string" &&
+      /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.trim())
+    );
+  }
 
   // معرّف الزائر: يُولَّد مرة ويُحفظ في localStorage
   var VISITOR_KEY = "wa_widget_visitor";
@@ -29,12 +44,19 @@
   }
 
   // أنماط الويدجت — تُحقن مباشرة دون أي CSS خارجي
+  // اللون الأساسي متغير CSS واحد يحرّك الزر والرأس وحدود حقل الإدخال
   var css =
-    "#wa-widget-bubble{position:fixed;bottom:20px;left:20px;width:56px;height:56px;border-radius:50%;background:hsl(262,83%,58%);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:99999;transition:transform .15s}" +
+    "#wa-widget-bubble{position:fixed;bottom:20px;left:20px;width:56px;height:56px;border-radius:50%;background:var(--wa-accent,hsl(262,83%,58%));border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:99999;transition:transform .15s}" +
     "#wa-widget-bubble:hover{transform:scale(1.08)}" +
     "#wa-widget-window{position:fixed;bottom:88px;left:20px;width:380px;max-width:calc(100vw - 40px);height:520px;max-height:calc(100vh - 110px);background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.2);display:none;flex-direction:column;overflow:hidden;direction:rtl;z-index:99999;font-family:'Segoe UI',Tahoma,Arial,sans-serif}" +
     "#wa-widget-window.open{display:flex}" +
-    ".wa-widget-header{background:hsl(262,83%,58%);color:#fff;padding:14px 16px;font-size:15px;font-weight:700}" +
+    ".wa-widget-header{background:var(--wa-accent,hsl(262,83%,58%));color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}" +
+    ".wa-widget-head-text{min-width:0}" +
+    ".wa-widget-title{font-size:15px;font-weight:700}" +
+    ".wa-widget-subtitle{font-size:12px;font-weight:400;opacity:.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+    ".wa-widget-subtitle:empty{display:none}" +
+    ".wa-widget-close{background:transparent;border:none;color:#fff;cursor:pointer;font-size:15px;line-height:1;padding:5px 7px;border-radius:6px;opacity:.8;flex-shrink:0}" +
+    ".wa-widget-close:hover{opacity:1;background:rgba(255,255,255,.15)}" +
     ".wa-widget-msgs{flex:1;overflow-y:auto;padding:12px;background:#f7f7f8;display:flex;flex-direction:column;gap:8px}" +
     ".wa-msg{max-width:78%;padding:8px 12px;border-radius:10px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}" +
     ".wa-msg-visitor{align-self:flex-end;background:#d9fdd3}" +
@@ -42,8 +64,8 @@
     ".wa-msg-system{align-self:center;background:transparent;color:#8a8a93;font-size:11.5px;text-align:center}" +
     ".wa-widget-input{display:flex;gap:8px;padding:10px;border-top:1px solid #eee}" +
     ".wa-widget-input input{flex:1;border:1px solid #ddd;border-radius:8px;padding:8px 10px;font-size:13.5px;font-family:inherit;outline:none}" +
-    ".wa-widget-input input:focus{border-color:hsl(262,83%,58%)}" +
-    ".wa-widget-input button{background:hsl(262,83%,58%);color:#fff;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-size:15px}";
+    ".wa-widget-input input:focus{border-color:var(--wa-accent,hsl(262,83%,58%))}" +
+    ".wa-widget-input button{background:var(--wa-accent,hsl(262,83%,58%));color:#fff;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-size:15px}";
 
   var style = document.createElement("style");
   style.textContent = css;
@@ -56,11 +78,17 @@
   bubble.innerHTML =
     '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>';
 
-  // نافذة المحادثة
+  // نافذة المحادثة — رأس فيه العنوان والوصف وزر إغلاق واضح
   var win = document.createElement("div");
   win.id = "wa-widget-window";
   win.innerHTML =
-    '<div class="wa-widget-header">تحدث معنا</div>' +
+    '<div class="wa-widget-header">' +
+    '<div class="wa-widget-head-text">' +
+    '<div class="wa-widget-title">تحدث معنا</div>' +
+    '<div class="wa-widget-subtitle"></div>' +
+    "</div>" +
+    '<button type="button" class="wa-widget-close" aria-label="إغلاق المحادثة">&#10005;</button>' +
+    "</div>" +
     '<div class="wa-widget-msgs"></div>' +
     '<div class="wa-widget-input"><input type="text" placeholder="اكتب رسالتك…"/><button type="button">➤</button></div>';
 
@@ -70,6 +98,40 @@
   var msgsEl = win.querySelector(".wa-widget-msgs");
   var inputEl = win.querySelector("input");
   var sendBtn = win.querySelector(".wa-widget-input button");
+  var titleEl = win.querySelector(".wa-widget-title");
+  var subtitleEl = win.querySelector(".wa-widget-subtitle");
+  var closeBtn = win.querySelector(".wa-widget-close");
+
+  // تطبيق مظهر الويدجت — القيم الفارغة تُتجاهل فتبقى الافتراضيات
+  function applyLook(title, subtitle, color) {
+    if (title) {
+      titleEl.textContent = title;
+      bubble.setAttribute("aria-label", title);
+    }
+    if (subtitle) subtitleEl.textContent = subtitle;
+    if (validColor(color)) {
+      document.documentElement.style.setProperty("--wa-accent", color.trim());
+    }
+  }
+
+  // أي قيم ممررة في وسم السكربت تُطبَّق فوراً دون انتظار الشبكة
+  applyLook(attrTitle, attrSubtitle, attrColor);
+
+  // ثم جلب إعدادات الخادم — ما مُرِّر في وسم السكربت يتغلب عليها
+  fetch(API_BASE + "/api/widget?agentId=" + encodeURIComponent(AGENT_ID))
+    .then(function (r) {
+      return r.json();
+    })
+    .then(function (cfg) {
+      applyLook(
+        attrTitle || cfg.title,
+        attrSubtitle || cfg.subtitle,
+        validColor(attrColor) ? attrColor : cfg.color
+      );
+    })
+    .catch(function () {
+      /* تعذر الجلب — نكتفي بما هو مطبَّق */
+    });
 
   var conversationId = null; // يُستلم من أول رد
   var handedOffShown = false; // رسالة التحويل تظهر مرة واحدة
@@ -156,17 +218,32 @@
       });
   }
 
+  function startPoll() {
+    if (!pollTimer) {
+      poll();
+      pollTimer = setInterval(poll, 4000);
+    }
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
   bubble.addEventListener("click", function () {
     var opening = !win.classList.contains("open");
     win.classList.toggle("open");
     // تشغيل/إيقاف الاستطلاع مع فتح النافذة وإغلاقها
-    if (opening && !pollTimer) {
-      poll();
-      pollTimer = setInterval(poll, 4000);
-    } else if (!opening && pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+    if (opening) startPoll();
+    else stopPoll();
+  });
+
+  // زر الإغلاق في الرأس — يخفي النافذة ويوقف الاستطلاع
+  closeBtn.addEventListener("click", function () {
+    win.classList.remove("open");
+    stopPoll();
   });
 
   sendBtn.addEventListener("click", send);

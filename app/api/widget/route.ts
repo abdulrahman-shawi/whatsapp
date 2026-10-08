@@ -65,12 +65,49 @@ export async function POST(req: Request) {
   });
 }
 
+// جلب إعدادات مظهر الويدجت للوكيل (عنوان/وصف/لون) — تُخزن في إعدادات مساحة العمل
+async function getWidgetConfig(agentId: string) {
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, isActive: true },
+    select: { id: true, workspaceId: true },
+  });
+  if (!agent) return null;
+  const row = await prisma.setting.findUnique({
+    where: {
+      workspaceId_key: { workspaceId: agent.workspaceId, key: `widget:${agent.id}` },
+    },
+  });
+  let config: { title?: string; subtitle?: string; color?: string } = {};
+  if (row) {
+    try {
+      config = JSON.parse(row.value);
+    } catch {
+      /* قيمة تالفة — نعيد الافتراضيات */
+    }
+  }
+  return config;
+}
+
 // استطلاع ردود جديدة (بما فيها ردود الموظفين من صندوق الوارد)
 // ملاحظة MVP: أي شخص يملك conversationId يستطيع القراءة — المعرّف عشوائي طويل
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const conversationId = url.searchParams.get("conversationId");
   const sinceParam = url.searchParams.get("since");
+  const agentId = url.searchParams.get("agentId");
+
+  // طلب بلا conversationId ومع agentId = جلب إعدادات المظهر للويدجت المضمّن
+  if (!conversationId && agentId) {
+    const config = await getWidgetConfig(agentId);
+    if (!config) {
+      return json({ error: "الوكيل غير متاح" }, { status: 404 });
+    }
+    return json({
+      title: config.title ?? null,
+      subtitle: config.subtitle ?? null,
+      color: config.color ?? null,
+    });
+  }
 
   if (!conversationId) {
     return json({ error: "conversationId مطلوب" }, { status: 400 });

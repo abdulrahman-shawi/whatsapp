@@ -32,6 +32,8 @@ export const WORKFLOW_STEP_LABELS: Record<string, string> = {
   QUERY_DB: "استعلام قاعدة بيانات",
   STOP_AI: "إيقاف الرد الآلي",
   CLOSE: "إغلاق المحادثة",
+  DELETE_CONVERSATION: "حذف المحادثة",
+  BLOCK_CONTACT: "حظر المستخدم",
   REOPEN: "إعادة فتح المحادثة",
   WAIT: "انتظار (تأخير)",
   WEBHOOK: "Webhook خارجي",

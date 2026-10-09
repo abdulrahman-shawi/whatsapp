@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
 import { getIntegrationList } from "@/lib/settings";
+import { getWorkspaceThemeColor } from "@/lib/theme";
 import { prisma } from "@/lib/prisma";
 import { IntegrationsForm } from "@/components/settings/integrations-form";
 import { TemplatesForm } from "@/components/settings/templates-form";
@@ -9,6 +10,7 @@ import { StaffPermissionsCard } from "@/components/settings/staff-permissions-ca
 import { SettingsShell } from "@/components/settings/settings-shell";
 import { UsageSection } from "@/components/settings/usage-section";
 import { BillingSection } from "@/components/settings/billing-section";
+import { AppearanceForm } from "@/components/settings/appearance-form";
 import { WebhooksClient } from "@/components/webhooks/webhooks-client";
 import { ApiKeysClient } from "@/components/api-keys/api-keys-client";
 
@@ -35,6 +37,7 @@ export default async function SettingsPage({
     workflows,
     outboundWebhooks,
     apiKeys,
+    themeColor,
   ] = await Promise.all([
     getIntegrationList(ctx.workspaceId),
     prisma.template.findMany({
@@ -82,6 +85,7 @@ export default async function SettingsPage({
         createdAt: true,
       },
     }),
+    getWorkspaceThemeColor(ctx.workspaceId),
   ]);
 
   const navGroups = [
@@ -92,6 +96,10 @@ export default async function SettingsPage({
         { id: "permissions", label: "الصلاحيات" },
         { id: "audit", label: "السجل", href: "/audit" },
       ],
+    },
+    {
+      label: "المظهر",
+      items: [{ id: "appearance", label: "المظهر" }],
     },
     {
       label: "التكاملات",
@@ -169,6 +177,20 @@ export default async function SettingsPage({
               <StaffPermissionsCard
                 initialRestricted={workspace?.restrictStaff ?? false}
               />
+            ),
+          },
+          {
+            id: "appearance",
+            group: "المظهر",
+            node: (
+              <div>
+                <h3 className="text-base font-semibold">المظهر</h3>
+                <p className="mb-3 text-sm text-muted-foreground">
+                  لون العلامة الأساسي — يُطبَّق فور الحفظ على لوحة التحكم كلها
+                  (الأزرار، الروابط، والعناصر المميزة)
+                </p>
+                <AppearanceForm initialColor={themeColor} />
+              </div>
             ),
           },
           {

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceContext } from "@/lib/session";
+import { getThemeCssVars } from "@/lib/theme";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { LogoutButton } from "@/components/logout-button";
@@ -28,8 +29,14 @@ export default async function DashboardLayout({
     include: { workspace: true },
   });
 
+  // لون العلامة لمساحة العمل — يُحقن كمتغيرات CSS على الجذر فتكتسبه الواجهة كلها
+  const themeVars = await getThemeCssVars(ctx.workspaceId);
+
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div
+      className="flex h-screen overflow-hidden"
+      style={themeVars as React.CSSProperties}
+    >
       <aside className="flex h-full w-64 shrink-0 flex-col overflow-y-auto border-l bg-card p-4">
         <div className="mb-6 px-2">
           <h1 className="text-lg font-bold text-primary">ردّ</h1>

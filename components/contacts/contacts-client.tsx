@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, Download, GripVertical, Inbox, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ContactDetailsDialog } from "@/components/contacts/contact-details-dialog";
 import { CONTACT_STAGES, stageConfig } from "@/lib/contact-stages";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,9 @@ export function ContactsClient() {
   const [tag, setTag] = useState("");
   const [overStage, setOverStage] = useState<string | null>(null);
   const [savingStage, setSavingStage] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // علم يمنع فتح نافذة التفاصيل إذا سبقه سحب للبطاقة (النقر قد يُطلق بعد الإفلات في بعض المتصفحات)
+  const justDragged = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,15 +205,28 @@ export function ContactsClient() {
                       key={c.id}
                       draggable
                       onDragStart={(e) => {
+                        justDragged.current = true;
                         e.dataTransfer.setData("text/plain", c.id);
                         e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragEnd={() => {
+                        // إعادة الأهلية للنقر بعد انتهاء السحب مباشرةً
+                        setTimeout(() => (justDragged.current = false), 100);
                       }}
                       className="cursor-grab rounded-lg border bg-card p-2.5 text-sm shadow-sm active:cursor-grabbing"
                     >
                       <div className="flex items-start justify-between gap-1">
-                        <p className="font-medium">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (justDragged.current) return;
+                            setSelectedId(c.id);
+                          }}
+                          className="text-start font-medium hover:text-primary hover:underline"
+                          title="عرض تفاصيل العميل"
+                        >
                           {c.name ?? c.waPhone}
-                        </p>
+                        </button>
                         <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       </div>
                       {c.name && (
@@ -256,6 +273,15 @@ export function ContactsClient() {
           ))}
         </div>
       )}
+
+      {/* نافذة تفاصيل العميل — تُعاد تحميل القائمة عند تعديل المرحلة من داخلها */}
+      <ContactDetailsDialog
+        contactId={selectedId}
+        onClose={(changed) => {
+          setSelectedId(null);
+          if (changed) void load();
+        }}
+      />
     </div>
   );
 }

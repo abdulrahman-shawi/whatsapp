@@ -23,6 +23,7 @@ export async function PATCH(
 
   const data: {
     name?: string | null;
+    email?: string | null;
     tags?: string[];
     notes?: string | null;
     stage?: ContactStage;
@@ -32,6 +33,16 @@ export async function PATCH(
       return NextResponse.json({ error: "الاسم غير صالح" }, { status: 400 });
     }
     data.name = body.name?.trim() || null;
+  }
+  if (body.email !== undefined) {
+    if (body.email !== null && typeof body.email !== "string") {
+      return NextResponse.json({ error: "البريد غير صالح" }, { status: 400 });
+    }
+    const email = body.email?.trim() || null;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: "صيغة البريد الإلكتروني غير صحيحة" }, { status: 400 });
+    }
+    data.email = email;
   }
   if (body.tags !== undefined) {
     if (!Array.isArray(body.tags) || !body.tags.every((t: unknown) => typeof t === "string")) {
@@ -65,7 +76,7 @@ export async function PATCH(
   const contact = await prisma.contact.update({
     where: { id: params.id },
     data,
-    select: { id: true, name: true, waPhone: true, tags: true, notes: true, stage: true },
+    select: { id: true, name: true, email: true, waPhone: true, tags: true, notes: true, stage: true },
   });
 
   // محفّز سير العمل: تغيير حالة العميل في مسار البيع

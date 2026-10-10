@@ -333,7 +333,7 @@ export function InboxClient({
 
   // حفظ تعديلات جهة الاتصال وتحديث الحالة المحلية
   async function handleUpdateContact(
-    patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes" | "stage">>
+    patch: Partial<Pick<ContactInfo, "name" | "email" | "tags" | "notes" | "stage">>
   ) {
     if (!selected) return;
     const res = await fetch(`/api/contacts/${selected.contact.id}`, {

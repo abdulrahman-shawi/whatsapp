@@ -348,6 +348,7 @@ model Contact {
   workspaceId   String
   waPhone       String // رقم الواتساب بصيغة دولية
   name          String?
+  email         String? // البريد الإلكتروني للعميل (اختياري)
   notes         String?
   stage         ContactStage          @default(NEW) // مرحلة العميل في مسار البيع
   leadScore     Int                   @default(0) // نقاط جودة العميل المحتمل — تُحتسب تلقائياً (انظر lib/scoring.ts)

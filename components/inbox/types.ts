@@ -3,6 +3,7 @@
 export type ContactInfo = {
   id: string;
   name: string | null;
+  email: string | null; // البريد الإلكتروني (اختياري)
   waPhone: string;
   tags: string[];
   notes: string | null;

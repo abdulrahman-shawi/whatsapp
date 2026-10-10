@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Inbox,
   Loader2,
+  Mail,
   MessageSquare,
   Phone,
   UserPlus,
@@ -21,6 +22,7 @@ type Profile = {
   contact: {
     id: string;
     name: string | null;
+    email: string | null;
     waPhone: string;
     notes: string | null;
     tags: string[];
@@ -138,6 +140,12 @@ export function ContactDetailsDialog({
                 <p className="flex items-center gap-1 text-sm text-muted-foreground" dir="ltr">
                   <Phone className="h-3.5 w-3.5" />
                   {c.waPhone}
+                </p>
+              )}
+              {c.email && (
+                <p className="flex items-center gap-1 text-sm text-muted-foreground" dir="ltr">
+                  <Mail className="h-3.5 w-3.5" />
+                  {c.email}
                 </p>
               )}
             </div>

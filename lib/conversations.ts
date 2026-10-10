@@ -68,6 +68,7 @@ export async function getWorkspaceConversations(
         select: {
           id: true,
           name: true,
+          email: true,
           waPhone: true,
           tags: true,
           notes: true,

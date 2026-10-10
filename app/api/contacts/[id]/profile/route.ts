@@ -15,6 +15,7 @@ export async function GET(
     select: {
       id: true,
       name: true,
+      email: true,
       waPhone: true,
       notes: true,
       tags: true,

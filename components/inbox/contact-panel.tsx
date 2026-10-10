@@ -25,7 +25,7 @@ type ActivityEvent = {
 type Props = {
   contact: ContactInfo;
   onSave: (
-    patch: Partial<Pick<ContactInfo, "name" | "tags" | "notes" | "stage">>
+    patch: Partial<Pick<ContactInfo, "name" | "email" | "tags" | "notes" | "stage">>
   ) => void;
   // بطاقة المحادثة: وسوم وملاحظات على مستوى المحادثة (مستقلة عن جهة الاتصال)
   conversation?: {
@@ -41,6 +41,7 @@ type Props = {
 // لوحة جهة الاتصال (العمود الأيسر): بطاقة المحادثة، الاسم، الوسوم، الملاحظات، الحجوزات
 export function ContactPanel({ contact, onSave, conversation, onSaveConversation }: Props) {
   const [name, setName] = useState(contact.name ?? "");
+  const [email, setEmail] = useState(contact.email ?? "");
   const [notes, setNotes] = useState(contact.notes ?? "");
   const [tagInput, setTagInput] = useState("");
   const [convTagInput, setConvTagInput] = useState("");
@@ -51,12 +52,15 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   // نقاط تقييم العميل — تُجلب من ملفه لأن بيانات الوارد لا تتضمنها
   const [leadScore, setLeadScore] = useState<number | null>(null);
+  // آخر ظهور: أحدث رسالة واردة من العميل
+  const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
   // سجل النشاط مخفي افتراضياً ويُعرض بالضغط على العنوان
   const [showActivity, setShowActivity] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLeadScore(null);
+    setLastSeenAt(null);
     fetch(`/api/bookings?contactId=${contact.id}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -66,7 +70,9 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
     fetch(`/api/contacts/${contact.id}/activity`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data?.events) setActivity(data.events);
+        if (cancelled) return;
+        if (data?.events) setActivity(data.events);
+        if (data && "lastSeenAt" in data) setLastSeenAt(data.lastSeenAt);
       })
       .catch(() => {});
     fetch(`/api/contacts/${contact.id}/profile`)
@@ -83,11 +89,12 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
   // مزامنة الحقول عند تبديل جهة الاتصال أو المحادثة
   useEffect(() => {
     setName(contact.name ?? "");
+    setEmail(contact.email ?? "");
     setNotes(contact.notes ?? "");
     setTagInput("");
     setConvTagInput("");
     setConvNotes(conversation?.notes ?? "");
-  }, [contact.id, contact.name, contact.notes, conversation?.id, conversation?.notes]);
+  }, [contact.id, contact.name, contact.email, contact.notes, conversation?.id, conversation?.notes]);
 
   function addTag() {
     const tag = tagInput.trim();
@@ -201,6 +208,31 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
         />
         <p className="text-xs text-muted-foreground" dir="ltr">
           {contact.waPhone}
+        </p>
+        {/* البريد الإلكتروني */}
+        <Label htmlFor="contact-email" className="pt-1">البريد الإلكتروني</Label>
+        <Input
+          id="contact-email"
+          type="email"
+          dir="ltr"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onBlur={() => {
+            const trimmed = email.trim();
+            if (trimmed === (contact.email ?? "")) return;
+            if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return;
+            onSave({ email: trimmed || null });
+          }}
+          placeholder="example@mail.com"
+          className="text-left text-xs"
+        />
+        {/* آخر ظهور: أحدث رسالة واردة من العميل */}
+        <p className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+          <History className="h-3.5 w-3.5" />
+          آخر ظهور:
+          <span className="font-medium text-foreground">
+            {lastSeenAt ? relativeTime(lastSeenAt) : "لا يوجد نشاط"}
+          </span>
         </p>
       </div>
 

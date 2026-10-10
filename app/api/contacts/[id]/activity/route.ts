@@ -18,7 +18,7 @@ export async function GET(
   });
   if (!contact) return NextResponse.json({ error: "غير موجود" }, { status: 404 });
 
-  const [messages, bookings, stageHistory] = await Promise.all([
+  const [messages, bookings, stageHistory, lastInbound] = await Promise.all([
     prisma.message.findMany({
       where: { conversation: { contactId: params.id }, isNote: false },
       orderBy: { createdAt: "desc" },
@@ -43,9 +43,16 @@ export async function GET(
       take: 30,
       select: { id: true, stage: true, createdAt: true },
     }),
+    // آخر ظهور: أحدث رسالة واردة من العميل
+    prisma.message.findFirst({
+      where: { conversation: { contactId: params.id }, direction: "INBOUND", isNote: false },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
   ]);
 
   return NextResponse.json({
+    lastSeenAt: lastInbound?.createdAt.toISOString() ?? null,
     events: [
       ...messages.map((m) => ({
         type: m.direction === "INBOUND" ? "message_in" : "message_out",

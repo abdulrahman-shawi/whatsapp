@@ -36,6 +36,7 @@ export type AgentFormData = {
   handoffKeywords: string[];
   isActive: boolean;
   knowledgeSources: KnowledgeItem[];
+  offHoursReply?: string | null;
 };
 
 // مصدر نصي محلي (قبل إنشاء الوكيل)
@@ -52,6 +53,9 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(
     agent?.welcomeMessage ?? ""
+  );
+  const [offHoursReply, setOffHoursReply] = useState(
+    agent?.offHoursReply ?? ""
   );
   const [responseDelaySec, setResponseDelaySec] = useState(
     agent?.responseDelaySec ?? 3
@@ -223,6 +227,7 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
       name,
       systemPrompt,
       welcomeMessage,
+      offHoursReply,
       responseDelaySec,
       handoffKeywords,
       isActive,
@@ -283,6 +288,22 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
               placeholder="أهلاً بك! كيف أقدر أساعدك اليوم؟"
               rows={2}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="off-hours-reply">الرد خارج أوقات الدوام (اختياري)</Label>
+            <Textarea
+              id="off-hours-reply"
+              value={offHoursReply}
+              onChange={(e) => setOffHoursReply(e.target.value)}
+              placeholder="أهلاً بك، سنعاود التواصل معك في أوقات الدوام"
+              rows={2}
+              dir="rtl"
+            />
+            <p className="text-xs text-muted-foreground">
+              يُرسل هذا الرد تلقائياً بدل الرد الذكي خارج ساعات العمل — فقط إذا
+              كانت ساعات العمل مضبوطة في الإعدادات (الإعدادات ← ساعات العمل)،
+              ويتخطى الوكيل استدعاء الذكاء الاصطناعي عند إرساله
+            </p>
           </div>
           <TestChat systemPrompt={systemPrompt} knowledge={allKnowledge} />
         </CardContent>

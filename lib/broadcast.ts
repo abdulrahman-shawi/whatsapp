@@ -71,6 +71,20 @@ function personalize(body: string, displayName: string, link: string | null): st
   return text;
 }
 
+// اختبار A/B: تقسيم حتمي ثابت للجمهور — نصف بناءً على بصمة معرّف العميل
+// تُستخدم نفس الدالة في الإرسال وفي مسار التتبّع لتحديد نسخة العميل
+export function variantForContact(
+  contactId: string,
+  hasB: boolean
+): "A" | "B" {
+  if (!hasB) return "A";
+  let hash = 0;
+  for (let i = 0; i < contactId.length; i++) {
+    hash = (hash * 31 + contactId.charCodeAt(i)) | 0;
+  }
+  return hash % 2 === 0 ? "A" : "B";
+}
+
 // الإرسال الفعلي للحملة: يُستدعى فوراً من مسار الإنشاء أو لاحقاً من cron الجدولة
 // يحدّث عدّادات الحملة وحالتها ويسجّل الاستهلاك الشهري
 export async function sendBroadcast(campaignId: string): Promise<void> {
@@ -106,13 +120,20 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
   });
 
   // رابط التتبّع لكل عميل: {{link}} تُستبدل برابط يمر عبر /api/track ثم يحوّل للعرض
+  // نسخة B لها رابطها الخاص (linkUrlB) — مع السقوط لرابط النسخة A إن تُرك فارغاً
+  const hasB = Boolean(campaign.bodyB?.trim());
   const base = trackingBaseUrl();
-  const linkFor = (contactId: string) =>
-    campaign.linkUrl
+  const linkFor = (contactId: string, variant: "A" | "B") => {
+    const target =
+      variant === "B"
+        ? campaign.linkUrlB?.trim() || campaign.linkUrl
+        : campaign.linkUrl;
+    return target
       ? base
-        ? `${base}/api/track/${campaign.id}/${contactId}?u=${encodeURIComponent(campaign.linkUrl)}`
-        : campaign.linkUrl
+        ? `${base}/api/track/${campaign.id}/${contactId}?u=${encodeURIComponent(target)}`
+        : target
       : null;
+  };
 
   const creds = await resolveWhatsAppCreds(campaign.workspaceId);
 
@@ -120,9 +141,19 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
   const usage = await getUsageStatus(campaign.workspaceId);
   if (usage.remaining < contacts.length) {
     // رصيد غير كافٍ: نفشل الحملة كاملة دون إرسال أي رسالة
+    const failedB = hasB
+      ? contacts.filter((c) => variantForContact(c.id, hasB) === "B").length
+      : 0;
     await prisma.broadcastCampaign.update({
       where: { id: campaign.id },
-      data: { status: "FAILED", failedCount: campaign.totalCount, sentAt: new Date() },
+      data: {
+        status: "FAILED",
+        sentCount: 0,
+        failedCount: contacts.length - failedB,
+        sentCountB: 0,
+        failedCountB: failedB,
+        sentAt: new Date(),
+      },
     });
     // ويب هوك صادر: فشل الحملة لنقص الرصيد
     fireOutboundEvent(campaign.workspaceId, "broadcast.failed", {
@@ -144,10 +175,16 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
   // الإرسال المتسلسل مع تحديث العدّادات — لا ننشئ سجلات Message (تلويث للمحادثات)
   let sent = 0;
   let failed = 0;
+  let sentB = 0;
+  let failedB = 0;
   const month = currentMonth();
   for (const contact of contacts) {
     // اسم العميل المعروض: الاسم إن وُجد وإلا رقمه — يُدرج مكان {{name}}
     const displayName = contact.name ?? contact.waPhone;
+    // اختبار A/B: نصف الجمهور (حتمياً ببصمة المعرف) يتلقى نصّي نسخة B ورابطها
+    const variant = variantForContact(contact.id, hasB);
+    const body =
+      variant === "B" && campaign.bodyB ? campaign.bodyB : campaign.body;
     const ok =
       creds &&
       (template
@@ -166,17 +203,24 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
         : // الرسائل النصية: استبدال {{name}} باسم العميل و{{link}} برابط التتبّع لكل مستلم
           await sendWhatsAppMessage(
             contact.waPhone,
-            personalize(campaign.body, displayName, linkFor(contact.id)),
+            personalize(body, displayName, linkFor(contact.id, variant)),
             creds
           ));
-    if (ok) sent++;
-    else failed++;
+    if (ok) {
+      sent++;
+      if (variant === "B") sentB++;
+    } else {
+      failed++;
+      if (variant === "B") failedB++;
+    }
     await prisma.$transaction([
       prisma.broadcastCampaign.update({
         where: { id: campaign.id },
         data: {
           sentCount: sent,
           failedCount: failed,
+          sentCountB: sentB,
+          failedCountB: failedB,
           status: "SENDING",
         },
       }),

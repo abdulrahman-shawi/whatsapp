@@ -25,6 +25,7 @@ type Profile = {
     notes: string | null;
     tags: string[];
     stage: string;
+    leadScore: number;
     blocked: boolean;
     createdAt: string;
     conversationCount: number;
@@ -187,6 +188,19 @@ export function ContactDetailsDialog({
                     </option>
                   ))}
                 </select>
+                <span
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold",
+                    c.leadScore >= 70
+                      ? "bg-emerald-100 text-emerald-700"
+                      : c.leadScore >= 40
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-muted text-muted-foreground"
+                  )}
+                  title="نقاط تقييم العميل"
+                >
+                  {c.leadScore} نقطة
+                </span>
                 {c.blocked && (
                   <Badge variant="outline" className="border-red-300 text-red-600">
                     محظور

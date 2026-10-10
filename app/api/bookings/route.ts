@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { dateTime } from "@/lib/time";
 import { notifyMembers } from "@/lib/notify";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { recalculateLeadScore } from "@/lib/scoring";
 
 // GET: حجوزات مساحة العمل ضمن نطاق زمني — ?contactId= يحصرها لعميل واحد (لوحة جهة الاتصال)
 // ‎?from= &to= (ISO) للتقويم الشهري — الافتراضي: من الشهر الحالي ±شهر
@@ -79,6 +80,8 @@ export async function POST(req: Request) {
       notes: body.notes?.trim() || null,
     },
   });
+  // تحديث نقاط تقييم العميل المحتمل بعد إنشاء حجز — لا يحجب الإنشاء
+  void recalculateLeadScore(contact.id);
   // إشعار الفريق بالحجز الجديد (داخلي + Push) — باستثناء من أنشأه
   notifyMembers({
     workspaceId: ctx.workspaceId,

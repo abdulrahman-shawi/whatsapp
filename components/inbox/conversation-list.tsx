@@ -224,6 +224,15 @@ export function ConversationList({
                   {c.platform === "WIDGET" && (
                     <Badge variant="outline">من الموقع</Badge>
                   )}
+                  {c.platform === "TELEGRAM" && (
+                    <Badge variant="outline">تيليجرام</Badge>
+                  )}
+                  {c.platform === "MESSENGER" && (
+                    <Badge variant="outline">ماسنجر</Badge>
+                  )}
+                  {c.platform === "INSTAGRAM" && (
+                    <Badge variant="outline">انستغرام</Badge>
+                  )}
                   {c.followUpAt && (
                     <Badge
                       variant="outline"

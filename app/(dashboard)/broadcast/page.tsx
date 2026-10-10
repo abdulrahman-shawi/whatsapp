@@ -26,17 +26,21 @@ export default async function BroadcastPage() {
       orderBy: { createdAt: "desc" },
     }),
     prisma.broadcastClick.groupBy({
-      by: ["campaignId"],
+      by: ["campaignId", "variant"],
       _count: true,
     }),
   ]);
 
   // تجميع التسميات المستعملة من جهات الاتصال
   const tags = [...new Set(contacts.flatMap((c) => c.tags))].sort();
-  // عدد النقرات لكل حملة — يُعرض في سجل الحملات كنسبة تفاعل
-  const clickCountByCampaign = new Map(
-    clicks.map((c) => [c.campaignId, c._count])
-  );
+  // عدد النقرات لكل حملة ولكل نسخة (A/B) — يُعرض في سجل الحملات كنسبة تفاعل
+  const clickStatsByCampaign = new Map<string, { a: number; b: number }>();
+  for (const c of clicks) {
+    const entry = clickStatsByCampaign.get(c.campaignId) ?? { a: 0, b: 0 };
+    if (c.variant === "B") entry.b += c._count;
+    else entry.a += c._count;
+    clickStatsByCampaign.set(c.campaignId, entry);
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -47,12 +51,17 @@ export default async function BroadcastPage() {
         </p>
       </div>
       <BroadcastClient
-        initialCampaigns={campaigns.map((c) => ({
-          ...c,
-          clickCount: clickCountByCampaign.get(c.id) ?? 0,
-          createdAt: c.createdAt.toISOString(),
-          scheduledAt: c.scheduledAt ? c.scheduledAt.toISOString() : null,
-        }))}
+        initialCampaigns={campaigns.map((c) => {
+          const stats = clickStatsByCampaign.get(c.id) ?? { a: 0, b: 0 };
+          return {
+            ...c,
+            clickCount: stats.a + stats.b,
+            clickCountA: stats.a,
+            clickCountB: stats.b,
+            createdAt: c.createdAt.toISOString(),
+            scheduledAt: c.scheduledAt ? c.scheduledAt.toISOString() : null,
+          };
+        })}
         tags={tags}
         templates={templates}
       />

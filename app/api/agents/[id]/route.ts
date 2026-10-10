@@ -55,6 +55,12 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     data.welcomeMessage = body.welcomeMessage;
   }
+  if (body.offHoursReply !== undefined) {
+    if (typeof body.offHoursReply !== "string") {
+      return NextResponse.json({ error: "رد خارج الدوام غير صالح" }, { status: 400 });
+    }
+    data.offHoursReply = body.offHoursReply.trim() || null;
+  }
   if (body.responseDelaySec !== undefined) {
     if (!Number.isInteger(body.responseDelaySec) || body.responseDelaySec < 0) {
       return NextResponse.json({ error: "وقت الانتظار غير صالح" }, { status: 400 });
@@ -88,6 +94,25 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const agent = await prisma.agent.update({ where: { id: params.id }, data });
+
+  // لقطة نسخة محفوظة من إعدادات الوكيل (مع مصادر المعرفة) لتتبع التعديلات والاستعادة
+  const knowledge = await prisma.knowledgeSource.findMany({
+    where: { agentId: agent.id },
+    select: { title: true, type: true, content: true },
+  });
+  await prisma.agentVersion.create({
+    data: {
+      agentId: agent.id,
+      name: agent.name,
+      systemPrompt: agent.systemPrompt,
+      welcomeMessage: agent.welcomeMessage,
+      responseDelaySec: agent.responseDelaySec,
+      handoffKeywords: agent.handoffKeywords,
+      knowledge,
+      createdById: ctx.userId,
+    },
+  });
+
   // تدقيق تحديث الوكيل
   void logAudit({
     workspaceId: ctx.workspaceId,

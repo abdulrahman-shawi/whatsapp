@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History, Star, ChevronDown } from "lucide-react";
+import { CalendarDays, MessagesSquare, Plus, X, ArrowDownLeft, ArrowUpRight, History, Star, ChevronDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +12,13 @@ import { relativeTime } from "@/lib/time";
 import type { ContactInfo } from "./types";
 
 type ActivityEvent = {
-  type: "message_in" | "message_out" | "booking";
+  type: "message_in" | "message_out" | "booking" | "stage";
   id: string;
   body: string;
   ai: boolean;
+  // حدث تغيير المرحلة: المعرّف والمسمى العربي للمرحلة الجديدة
+  stage?: string;
+  stageLabel?: string;
   createdAt: string;
 };
 
@@ -46,11 +49,14 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
     { id: string; title: string; scheduledAt: string; notes: string | null }[]
   >([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  // نقاط تقييم العميل — تُجلب من ملفه لأن بيانات الوارد لا تتضمنها
+  const [leadScore, setLeadScore] = useState<number | null>(null);
   // سجل النشاط مخفي افتراضياً ويُعرض بالضغط على العنوان
   const [showActivity, setShowActivity] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setLeadScore(null);
     fetch(`/api/bookings?contactId=${contact.id}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -61,6 +67,12 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data?.events) setActivity(data.events);
+      })
+      .catch(() => {});
+    fetch(`/api/contacts/${contact.id}/profile`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.contact) setLeadScore(data.contact.leadScore ?? null);
       })
       .catch(() => {});
     return () => {
@@ -213,6 +225,22 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
             ))}
           </select>
         </div>
+        {leadScore !== null && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">نقاط التقييم</span>
+            <span
+              className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                leadScore >= 70
+                  ? "bg-emerald-100 text-emerald-700"
+                  : leadScore >= 40
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {leadScore}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* الوسوم */}
@@ -326,6 +354,8 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
                 <div className="flex flex-col items-center pt-1">
                   {e.type === "booking" ? (
                     <CalendarDays className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  ) : e.type === "stage" ? (
+                    <TrendingUp className="h-3.5 w-3.5 shrink-0 text-purple-600" />
                   ) : e.type === "message_in" ? (
                     <ArrowDownLeft className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                   ) : (
@@ -338,9 +368,11 @@ export function ContactPanel({ contact, onSave, conversation, onSaveConversation
                     <span className="shrink-0 font-medium">
                       {e.type === "booking"
                         ? "حجز"
-                        : e.type === "message_in"
-                          ? "رسالة واردة"
-                          : "رد مرسل"}
+                        : e.type === "stage"
+                          ? `تغيير المرحلة إلى ${e.stageLabel ?? e.stage ?? ""}`
+                          : e.type === "message_in"
+                            ? "رسالة واردة"
+                            : "رد مرسل"}
                     </span>
                     {e.ai && (
                       <Badge variant="secondary" className="px-1 py-0 text-[10px]">

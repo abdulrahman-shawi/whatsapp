@@ -237,7 +237,11 @@ function validateCondition(cond: unknown, label: string, errors: string[]): void
       }
       break;
     case "PLATFORM_IS":
-      if (!["WHATSAPP", "WIDGET"].includes(String(cond.platform))) {
+      if (
+        !["WHATSAPP", "WIDGET", "TELEGRAM", "MESSENGER", "INSTAGRAM"].includes(
+          String(cond.platform)
+        )
+      ) {
         errors.push(`${label}: القناة غير صالحة`);
       }
       break;

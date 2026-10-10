@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { AgentForm } from "@/components/agents/agent-form";
+import { AgentVersions } from "@/components/agents/agent-versions";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export default async function EditAgentPage({
           name: agent.name,
           systemPrompt: agent.systemPrompt,
           welcomeMessage: agent.welcomeMessage,
+          offHoursReply: agent.offHoursReply,
           responseDelaySec: agent.responseDelaySec,
           handoffKeywords: agent.handoffKeywords,
           isActive: agent.isActive,
@@ -43,6 +45,7 @@ export default async function EditAgentPage({
           })),
         }}
       />
+      <AgentVersions agentId={agent.id} />
     </div>
   );
 }

@@ -24,7 +24,7 @@ type TrainingMessage = {
 
 type TrainingConversation = {
   id: string;
-  platform: "WHATSAPP" | "WIDGET";
+  platform: "WHATSAPP" | "WIDGET" | "TELEGRAM" | "MESSENGER" | "INSTAGRAM";
   status: string;
   lastMessageAt: string;
   contactName: string | null;

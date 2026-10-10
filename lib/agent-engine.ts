@@ -5,10 +5,12 @@ import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
-import { triggerWorkflows } from "@/lib/workflows";
+import { triggerWorkflows, isBusinessHours } from "@/lib/workflows";
+import { getIntegration } from "@/lib/settings";
 import { detectLanguage, detectSentiment, LANGUAGE_NAMES } from "@/lib/sentiment";
 import { notifyUser } from "@/lib/notify";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { recalculateLeadScore } from "@/lib/scoring";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -61,6 +63,43 @@ async function incrementUsage(workspaceId: string, tokens = 0) {
     },
     create: { workspaceId, month, messagesUsed: 1, tokensUsed: tokens },
   });
+}
+
+// تنبيه داخلي واحد لكل مساحة عمل ولكل شهر — يُنشأ عند استنفاد الرصيد أو الاقتراب من الحد،
+// ولا يتكرر ما دام تنبيه سابق بنفس النوع غير مقروء منذ بداية الشهر
+async function notifyUsageAlert(
+  workspaceId: string,
+  title: string,
+  body: string
+): Promise<void> {
+  try {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const existing = await prisma.notification.findFirst({
+      where: {
+        workspaceId,
+        type: "USAGE_ALERT",
+        readAt: null,
+        createdAt: { gte: monthStart },
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.notification.create({
+      data: {
+        workspaceId,
+        userId: null, // null = الفريق كله
+        type: "USAGE_ALERT",
+        title,
+        body,
+        link: "/settings",
+      },
+    });
+  } catch (e) {
+    // فشل الإشعار لا يعطّل معالجة الرسائل أبداً
+    console.error("[agent-engine] تعذّر إنشاء تنبيه الاستهلاك:", e);
+  }
 }
 
 // تطبيع بسيط آمن للعربية قبل المطابقة الجزئية
@@ -163,6 +202,9 @@ async function runPipeline(
         : {}),
     },
   });
+  // تحديث نقاط تقييم العميل المحتمل بعد الرسالة الواردة — لا يحجب المعالجة
+  void recalculateLeadScore(contact.id);
+
   // إطلاق ويب هوك صادر: رسالة واردة جديدة — لا يحجب المعالجة
   fireOutboundEvent(workspaceId, "message.created", {
     id: inboundMsg.id,
@@ -290,7 +332,53 @@ async function runPipeline(
     console.warn(
       `[agent-engine] استنفاد رصيد الباقة للمساحة ${workspaceId} — ${exhausted} — أُوقف الرد الآلي وسُلّمت المحادثة`
     );
+    // تنبيه الفريق فور توقف الرد الآلي — مرة واحدة بالشهر، ولا يعطّل المعالجة عند فشله
+    void notifyUsageAlert(
+      workspaceId,
+      "استنفاد رصيد الباقة",
+      `توقّف الرد الآلي لاستنفاد ${exhausted}. رقِّ خطتك من الإعدادات أو انتظر بداية الشهر.`
+    );
     return { conversationId: conversation.id, reply: null, status: "HANDED_OFF" };
+  }
+
+  // ٧.ج الرد خارج أوقات الدوام: إذا ضُبطت ساعات العمل في الإعدادات وكان الوقت خارجها،
+  // نرسل نص offHoursReply ثابتاً بدل الرد الذكي (دون استدعاء OpenAI) — يُحسب رصيد رسالة كالمعتاد.
+  // لا يصل هذا الفرع إلا لمحادثات حالتها AI (المسلَّمة/اليدوية تتوقف عند الفحص أعلاه)،
+  // ويمر عبر نفس مسار الإرسال والتخزين والبث الذي يمر به الرد الذكي
+  if (agent.offHoursReply?.trim()) {
+    const [bhStart, bhEnd] = await Promise.all([
+      getIntegration(workspaceId, "BUSINESS_HOURS_START"),
+      getIntegration(workspaceId, "BUSINESS_HOURS_END"),
+    ]);
+    // غير مضبوط في الإعدادات → السلوك القديم تماماً (بلا قيد على الرد الآلي)
+    if ((bhStart || bhEnd) && !(await isBusinessHours(workspaceId))) {
+      if (agent.responseDelaySec > 0) {
+        await new Promise((r) => setTimeout(r, agent.responseDelaySec * 1000));
+      }
+      const offReply = agent.offHoursReply.trim();
+      await opts.sendReply(waPhone, offReply);
+      const replyMsg = await prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: "OUTBOUND",
+          senderType: "AI",
+          body: offReply,
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() },
+      });
+      await incrementUsage(workspaceId);
+      triggerNewMessage(workspaceId, conversation.id, replyMsg);
+      triggerConversationUpdated(workspaceId, conversation.id);
+      return {
+        conversationId: conversation.id,
+        reply: offReply,
+        status: "AI",
+        replyMessage: { id: replyMsg.id, createdAt: replyMsg.createdAt.toISOString() },
+      };
+    }
   }
 
   // ٨. الرد الآلي — انتظار بسيط يجمع الرسائل المتتابعة (MVP)

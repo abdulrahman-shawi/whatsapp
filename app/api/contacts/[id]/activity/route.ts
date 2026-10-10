@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { stageConfig } from "@/lib/contact-stages";
 
-// سجل نشاط العميل — خط زمني موحّد: رسائله، حجوزاته، وتنبيهاته
+// سجل نشاط العميل — خط زمني موحّد: رسائله، حجوزاته، وتغيّرات مرحلته
 // يُدمج ويُرتَّب زمنياً تنازلياً في الواجهة
 export async function GET(
   _req: Request,
@@ -17,7 +18,7 @@ export async function GET(
   });
   if (!contact) return NextResponse.json({ error: "غير موجود" }, { status: 404 });
 
-  const [messages, bookings] = await Promise.all([
+  const [messages, bookings, stageHistory] = await Promise.all([
     prisma.message.findMany({
       where: { conversation: { contactId: params.id }, isNote: false },
       orderBy: { createdAt: "desc" },
@@ -36,6 +37,12 @@ export async function GET(
       take: 20,
       select: { id: true, title: true, scheduledAt: true, notes: true, createdAt: true },
     }),
+    prisma.contactStageHistory.findMany({
+      where: { contactId: params.id },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: { id: true, stage: true, createdAt: true },
+    }),
   ]);
 
   return NextResponse.json({
@@ -53,6 +60,14 @@ export async function GET(
         body: b.title,
         notes: b.notes,
         createdAt: b.scheduledAt.toISOString(),
+      })),
+      ...stageHistory.map((s) => ({
+        type: "stage",
+        id: s.id,
+        stage: s.stage,
+        stageLabel: stageConfig(s.stage).label,
+        ai: false,
+        createdAt: s.createdAt.toISOString(),
       })),
     ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   });

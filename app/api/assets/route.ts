@@ -16,9 +16,12 @@ export async function POST(req: Request) {
   }
 
   let file: File | null = null;
+  let folder = "";
   try {
     const form = await req.formData();
     file = form.get("file") as File | null;
+    const folderField = form.get("folder");
+    if (typeof folderField === "string") folder = folderField.trim();
   } catch {
     return NextResponse.json({ error: "طلب غير صالح" }, { status: 400 });
   }
@@ -44,11 +47,29 @@ export async function POST(req: Request) {
       workspaceId: ctx.workspaceId,
       filename: file.name || "ملف",
       mime: file.type,
+      folder,
       dataBase64: bytes.toString("base64"),
     },
   });
   return NextResponse.json(
-    { id: asset.id, filename: asset.filename, mime: asset.mime },
+    { id: asset.id, filename: asset.filename, mime: asset.mime, folder: asset.folder },
     { status: 201 }
   );
+}
+
+// قائمة وسائط المساحة (بلا بيانات الملفات) — مع فلترة ?folder= لاسم مجلد محدد
+export async function GET(req: Request) {
+  const ctx = await getWorkspaceContext();
+  if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+
+  const folder = new URL(req.url).searchParams.get("folder")?.trim() ?? "";
+  const assets = await prisma.mediaAsset.findMany({
+    where: { workspaceId: ctx.workspaceId, ...(folder ? { folder } : {}) },
+    select: { id: true, filename: true, mime: true, folder: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  return NextResponse.json({
+    assets: assets.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() })),
+  });
 }

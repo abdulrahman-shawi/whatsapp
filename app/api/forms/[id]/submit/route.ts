@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { triggerConversationUpdated, triggerNewMessage } from "@/lib/pusher";
 import { isContactStage } from "@/lib/contact-stages";
+import { recordStageChange } from "@/lib/stage-history";
+import { recalculateLeadScore } from "@/lib/scoring";
 import type { LeadFormField } from "@/lib/lead-forms";
 
 // استقبال إرسالة نموذج عام — بلا مصادقة: تصل كمحادثة واردة في صندوق الوارد
@@ -95,6 +97,12 @@ export async function POST(
       tags: mergedTags,
     },
   });
+
+  // المرحلة التلقائية تُضبط عند الإنشاء فقط — ونُسجّلها في سجل المراحل
+  if (form.autoStage && isContactStage(form.autoStage)) {
+    await recordStageChange(contact.id, form.autoStage, "form");
+  }
+  void recalculateLeadScore(contact.id);
 
   const agent = await prisma.agent.findFirst({
     where: { workspaceId, isActive: true },

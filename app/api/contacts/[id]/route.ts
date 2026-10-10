@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { isContactStage } from "@/lib/contact-stages";
 import { triggerWorkflows } from "@/lib/workflows";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { recordStageChange } from "@/lib/stage-history";
+import { recalculateLeadScore } from "@/lib/scoring";
 
 // تحديث بيانات جهة الاتصال: الاسم، الوسوم، الملاحظات
 export async function PATCH(
@@ -68,6 +70,10 @@ export async function PATCH(
 
   // محفّز سير العمل: تغيير حالة العميل في مسار البيع
   if (data.stage && existing.stage !== data.stage) {
+    // سجل المراحل + إعادة احتساب نقاط العميل
+    await recordStageChange(contact.id, data.stage, "manual");
+    void recalculateLeadScore(contact.id);
+
     const conversation = await prisma.conversation.findFirst({
       where: { contactId: contact.id, isArchived: false, closedAt: null },
       orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } },

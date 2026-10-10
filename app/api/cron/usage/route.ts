@@ -30,10 +30,47 @@ export async function GET(req: Request) {
     }));
 
   for (const a of alerts) {
-    // TODO: هنا يُرسل تنبيه فعلي للعميل بالبريد أو واتساب (مثلاً عبر Resend)
     console.warn(
       `[usage-alert] مساحة العمل ${a.workspaceId}: رسائل ${a.percent}% (${a.used}/${a.limit}) — توكنات ${a.tokensPercent}% (${a.tokensUsed}/${a.tokenLimit})`
     );
+
+    // تنبيه داخلي للفريق — مرة واحدة لكل شهر: نتخطى إن وُجد تنبيه USAGE_ALERT
+    // غير مقروء لنفس المساحة منذ بداية الشهر الحالي
+    try {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const existing = await prisma.notification.findFirst({
+        where: {
+          workspaceId: a.workspaceId,
+          type: "USAGE_ALERT",
+          readAt: null,
+          createdAt: { gte: monthStart },
+        },
+        select: { id: true },
+      });
+      if (existing) continue;
+
+      const parts: string[] = [];
+      if (a.limit > 0 && a.percent >= 80) {
+        parts.push(`الرسائل ${a.percent}% (${a.used}/${a.limit})`);
+      }
+      if (a.tokenLimit > 0 && a.tokensPercent >= 80) {
+        parts.push(`توكنات الذكاء الاصطناعي ${a.tokensPercent}% (${a.tokensUsed}/${a.tokenLimit})`);
+      }
+      await prisma.notification.create({
+        data: {
+          workspaceId: a.workspaceId,
+          userId: null, // null = الفريق كله
+          type: "USAGE_ALERT",
+          title: "اقتراب حد الاستهلاك الشهري",
+          body: `استهلاكك وصل ${parts.join(" — ")} من حد الباقة. رقِّ خطتك قبل توقف الرد الآلي.`,
+          link: "/settings",
+        },
+      });
+    } catch (e) {
+      console.error("[usage-alert] تعذّر إنشاء إشعار الاستهلاك:", e);
+    }
   }
 
   return NextResponse.json({ alerts });

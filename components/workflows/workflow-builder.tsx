@@ -84,6 +84,9 @@ type Wire = {
 const PLATFORM_LABELS: Record<string, string> = {
   WHATSAPP: "واتساب",
   WIDGET: "ودجت الموقع",
+  TELEGRAM: "تيليجرام",
+  MESSENGER: "ماسنجر",
+  INSTAGRAM: "انستغرام",
 };
 
 // أيام الأسبوع بترتيبها العربي (السبت أولاً) — القيم كما في Date.getDay()
@@ -710,12 +713,30 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   // رفع ملف وسائط لخطوة SEND_MEDIA
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  // مكتبة الوسائط: قائمة الأصول لاختيار ملف مرفوع سابقاً + أسماء المجلدات
+  const [assetLibrary, setAssetLibrary] = useState<
+    { id: string; filename: string; mime: string; folder: string }[] | null
+  >(null);
+  const [assetFolderFilter, setAssetFolderFilter] = useState("");
+  const [uploadFolder, setUploadFolder] = useState("");
+
+  async function loadAssetLibrary(force = false) {
+    if (!force && assetLibrary) return;
+    try {
+      const res = await fetch("/api/assets");
+      const data = await res.json().catch(() => null);
+      if (res.ok) setAssetLibrary(data?.assets ?? []);
+    } catch {
+      // تعذر التحميل — تبقى المكتبة فارغة ويتاح الرفع المباشر فقط
+    }
+  }
 
   async function uploadAsset(file: File, apply: (patch: Partial<Step>) => void) {
     setUploading(true);
     setUploadError("");
     const form = new FormData();
     form.append("file", file);
+    if (uploadFolder.trim()) form.append("folder", uploadFolder.trim());
     try {
       const res = await fetch("/api/assets", { method: "POST", body: form });
       const data = await res.json().catch(() => null);
@@ -724,6 +745,8 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
         return;
       }
       apply({ assetId: data.id, assetName: data.filename, assetMime: data.mime, url: "" });
+      // تحديث المكتبة لاحقاً لتشمل الملف الجديد ومجلده
+      setAssetLibrary(null);
     } catch {
       setUploadError("فشل الرفع — تحقق من الاتصال");
     } finally {
@@ -1246,9 +1269,10 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               <Button
                 variant={!step.url ? "secondary" : "outline"}
                 size="sm"
-                onClick={() =>
-                  update({ url: "" })
-                }
+                onClick={() => {
+                  update({ url: "" });
+                  void loadAssetLibrary();
+                }}
               >
                 رفع ملف
               </Button>
@@ -1301,6 +1325,37 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
               />
             ) : (
               <div className="space-y-1.5">
+                {/* مجلد الوجهة: اسم حر أو أحد المجلدات الموجودة في المكتبة */}
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={uploadFolder}
+                    onChange={(e) => setUploadFolder(e.target.value)}
+                    placeholder="المجلد (اختياري) — اكتب اسماً جديداً أو اختر موجوداً"
+                    disabled={uploading}
+                  />
+                  {assetLibrary &&
+                    [...new Set(assetLibrary.map((a) => a.folder).filter(Boolean))]
+                      .length > 0 && (
+                      <select
+                        value=""
+                        disabled={uploading}
+                        onChange={(e) => {
+                          if (e.target.value) setUploadFolder(e.target.value);
+                        }}
+                        className="h-9 shrink-0 rounded-md border bg-background px-2 text-sm"
+                        title="المجلدات الموجودة"
+                      >
+                        <option value="">المجلدات…</option>
+                        {[...new Set(assetLibrary.map((a) => a.folder).filter(Boolean))].map(
+                          (f) => (
+                            <option key={f} value={f}>
+                              {f}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    )}
+                </div>
                 <Input
                   type="file"
                   accept="image/*,video/*,audio/*,application/pdf"
@@ -1322,6 +1377,70 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                     {uploadError}
                   </p>
                 )}
+                {/* مكتبة الوسائط: اختيار ملف مرفوع سابقاً مع فلترة بالمجلد */}
+                <div className="space-y-1.5 rounded-md border p-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium">أو اختر من المكتبة</p>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => void loadAssetLibrary(true)}
+                    >
+                      تحديث
+                    </button>
+                  </div>
+                  {!assetLibrary ? (
+                    <p className="text-xs text-muted-foreground">
+                      جارٍ تحميل المكتبة…
+                    </p>
+                  ) : assetLibrary.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      لا توجد ملفات مرفوعة بعد
+                    </p>
+                  ) : (
+                    <>
+                      <select
+                        value={assetFolderFilter}
+                        onChange={(e) => setAssetFolderFilter(e.target.value)}
+                        className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                      >
+                        <option value="">كل المجلدات</option>
+                        {[...new Set(assetLibrary.map((a) => a.folder).filter(Boolean))].map(
+                          (f) => (
+                            <option key={f} value={f}>
+                              {f}
+                            </option>
+                          )
+                        )}
+                      </select>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const asset = assetLibrary.find((a) => a.id === e.target.value);
+                          if (asset) {
+                            update({
+                              assetId: asset.id,
+                              assetName: asset.filename,
+                              assetMime: asset.mime,
+                              url: "",
+                            });
+                          }
+                        }}
+                        className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                      >
+                        <option value="">اختر ملفاً…</option>
+                        {assetLibrary
+                          .filter((a) => !assetFolderFilter || a.folder === assetFolderFilter)
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.filename}
+                              {a.folder ? ` (${a.folder})` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </>
+                  )}
+                </div>
               </div>
             )}
             <Input

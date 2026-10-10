@@ -55,17 +55,26 @@ export async function GET(req: Request) {
     take: 50,
   });
   const clicks = await prisma.broadcastClick.groupBy({
-    by: ["campaignId"],
+    by: ["campaignId", "variant"],
     _count: true,
   });
-  const clickCountByCampaign = new Map(
-    clicks.map((c) => [c.campaignId, c._count])
-  );
+  const clickStatsByCampaign = new Map<string, { a: number; b: number }>();
+  for (const c of clicks) {
+    const entry = clickStatsByCampaign.get(c.campaignId) ?? { a: 0, b: 0 };
+    if (c.variant === "B") entry.b += c._count;
+    else entry.a += c._count;
+    clickStatsByCampaign.set(c.campaignId, entry);
+  }
   return NextResponse.json({
-    campaigns: campaigns.map((c) => ({
-      ...c,
-      clickCount: clickCountByCampaign.get(c.id) ?? 0,
-    })),
+    campaigns: campaigns.map((c) => {
+      const stats = clickStatsByCampaign.get(c.id) ?? { a: 0, b: 0 };
+      return {
+        ...c,
+        clickCount: stats.a + stats.b,
+        clickCountA: stats.a,
+        clickCountB: stats.b,
+      };
+    }),
   });
 }
 
@@ -120,6 +129,16 @@ export async function POST(req: Request) {
   const linkUrl: string | null =
     typeof body?.linkUrl === "string" && body.linkUrl.trim()
       ? body.linkUrl.trim()
+      : null;
+
+  // نسخة B لاختبار A/B (اختيارية): نص بديل يُرسل لنصف الجمهور مع رابطها الخاص
+  const bodyB: string | null =
+    typeof body?.bodyB === "string" && body.bodyB.trim()
+      ? body.bodyB.trim()
+      : null;
+  const linkUrlB: string | null =
+    typeof body?.linkUrlB === "string" && body.linkUrlB.trim()
+      ? body.linkUrlB.trim()
       : null;
 
   // التحقق من صلاحية موعد الجدولة إن أُعطي
@@ -197,6 +216,8 @@ export async function POST(req: Request) {
       audience: JSON.stringify(audience),
       linkUrl,
       body: text,
+      bodyB,
+      linkUrlB,
       templateId: template?.id ?? null,
       status: scheduledAt ? "QUEUED" : "SENDING",
       scheduledAt,

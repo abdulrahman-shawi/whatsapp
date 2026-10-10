@@ -14,6 +14,7 @@ export async function GET(req: Request) {
   const q = params.get("q")?.trim();
   const stageParam = params.get("stage")?.trim();
   const tag = params.get("tag")?.trim();
+  const sort = params.get("sort")?.trim();
   const stage = CONTACT_STAGES.some((s) => s.value === stageParam)
     ? (stageParam as ContactStage)
     : undefined;
@@ -32,7 +33,11 @@ export async function GET(req: Request) {
       ...(stage ? { stage } : {}),
       ...(tag ? { tags: { has: tag } } : {}),
     },
-    orderBy: { createdAt: "desc" },
+    // sort=score: الأعلى نقاطاً أولاً — افتراضياً الأحدث إضافةً
+    orderBy:
+      sort === "score"
+        ? [{ leadScore: "desc" }, { createdAt: "desc" }]
+        : { createdAt: "desc" },
     take: 300,
     include: {
       conversations: {
@@ -50,6 +55,7 @@ export async function GET(req: Request) {
       name: c.name,
       waPhone: c.waPhone,
       stage: c.stage,
+      leadScore: c.leadScore,
       tags: c.tags,
       notes: c.notes,
       createdAt: c.createdAt.toISOString(),

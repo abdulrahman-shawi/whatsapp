@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds, sendWhatsAppMessage, getLastWhatsAppError } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
+import { recalculateLeadScore } from "@/lib/scoring";
 
 // فلتر الإسناد: الكل / محادثاتي / غير المسندة
 export type AssignmentFilter = "all" | "mine" | "unassigned";
@@ -177,6 +178,8 @@ export async function sendDueScheduledMessages(): Promise<{
         update: { messagesUsed: { increment: 1 } },
         create: { workspaceId: item.workspaceId, month, messagesUsed: 1 },
       });
+      // إعادة احتساب نقاط العميل بعد كل رسالة جديدة في محادثته
+      void recalculateLeadScore(item.conversation.contactId);
       triggerNewMessage(item.workspaceId, item.conversationId, {
         ...message,
         createdAt: message.createdAt.toISOString(),

@@ -16,6 +16,8 @@ import { collectAgentKnowledge } from "@/lib/retrieval";
 import { runKnowledgeQuery } from "@/lib/db-knowledge";
 import { getIntegration } from "@/lib/settings";
 import { isContactStage } from "@/lib/contact-stages";
+import { recordStageChange } from "@/lib/stage-history";
+import { recalculateLeadScore } from "@/lib/scoring";
 
 // شرط التفرع في خطوة IF
 export type IfCondition =
@@ -33,7 +35,7 @@ export type IfCondition =
   | { kind: "PHONE_CONTAINS"; text: string } // رقم العميل يحتوي النص…
   | { kind: "NAME_CONTAINS"; text: string } // اسم العميل يحتوي النص…
   | { kind: "ASSIGNEE_IS"; userId: string } // المسند إليه المحادثة هو الموظف…
-  | { kind: "PLATFORM_IS"; platform: "WHATSAPP" | "WIDGET" } // قناة المحادثة
+  | { kind: "PLATFORM_IS"; platform: "WHATSAPP" | "WIDGET" | "TELEGRAM" | "MESSENGER" | "INSTAGRAM" } // قناة المحادثة
   | { kind: "VAR_EQUALS"; name: string; value: string } // متغير سير العمل يساوي القيمة
   | { kind: "LAST_OUTBOUND_HOURS"; hours: number }; // مرّت X ساعة على آخر رد منا (أو لم نرد أصلاً)
 
@@ -252,7 +254,11 @@ function validateCondition(
       }
       break;
     case "PLATFORM_IS":
-      if (!["WHATSAPP", "WIDGET"].includes(cond.platform)) {
+      if (
+        !["WHATSAPP", "WIDGET", "TELEGRAM", "MESSENGER", "INSTAGRAM"].includes(
+          cond.platform
+        )
+      ) {
         errors.push(`${label}: القناة غير صالحة`);
       }
       break;
@@ -674,7 +680,7 @@ async function sendWorkflowMedia(
 // هل الوقت الحالي ضمن ساعات العمل؟ تُضبط من صفحة التكاملات
 // BUSINESS_HOURS_START / BUSINESS_HOURS_END (ساعة 0-23) / BUSINESS_HOURS_DAYS ("0,1,2…" — فارغ = كل الأيام)
 // عند عدم الضبط: لا قيد (true)
-async function isBusinessHours(workspaceId: string): Promise<boolean> {
+export async function isBusinessHours(workspaceId: string): Promise<boolean> {
   const [start, end, days] = await Promise.all([
     getIntegration(workspaceId, "BUSINESS_HOURS_START"),
     getIntegration(workspaceId, "BUSINESS_HOURS_END"),
@@ -980,6 +986,9 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
         where: { id: ctx.contactId },
         data: { stage: step.stage as never },
       });
+      // سجل المراحل (المصدر: سير العمل) + إعادة احتساب نقاط العميل
+      await recordStageChange(ctx.contactId, step.stage as never, "workflow");
+      void recalculateLeadScore(ctx.contactId);
       return "حُدِّثت حالة العميل";
     case "ADD_TAG": {
       const contact = await prisma.contact.findUnique({

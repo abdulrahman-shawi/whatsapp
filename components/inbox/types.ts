@@ -15,7 +15,7 @@ export type MemberInfo = {
 };
 
 export type ConversationStatus = "AI" | "MANUAL" | "HANDED_OFF";
-export type Platform = "WHATSAPP" | "WIDGET";
+export type Platform = "WHATSAPP" | "WIDGET" | "TELEGRAM" | "MESSENGER" | "INSTAGRAM";
 export type AssignmentFilter = "all" | "mine" | "unassigned";
 
 export type ConversationListItem = {

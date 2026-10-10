@@ -15,11 +15,17 @@ type Campaign = {
   id: string;
   tag: string;
   body: string;
+  bodyB?: string | null;
+  linkUrlB?: string | null;
   status: "QUEUED" | "SENDING" | "SENT" | "PARTIAL" | "FAILED";
   totalCount: number;
   sentCount: number;
   failedCount: number;
+  sentCountB: number;
+  failedCountB: number;
   clickCount: number;
+  clickCountA: number;
+  clickCountB: number;
   scheduledAt: string | Date | null;
   createdAt: string | Date;
 };
@@ -60,6 +66,8 @@ export function BroadcastClient({
   const [templateId, setTemplateId] = useState("");
   const [params, setParams] = useState<string[]>([]);
   const [body, setBody] = useState("");
+  const [bodyB, setBodyB] = useState("");
+  const [linkUrlB, setLinkUrlB] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -97,6 +105,8 @@ export function BroadcastClient({
         },
         linkUrl: linkUrl.trim() || null,
         body,
+        bodyB: bodyB.trim() || null,
+        linkUrlB: linkUrlB.trim() || null,
         templateId: templateId || null,
         // قيم متغيرات القالب مرتبة برقم المتغير — {{n}} في index n-1
         params: templateId
@@ -116,9 +126,13 @@ export function BroadcastClient({
     setResult(
       data.campaign.status === "QUEUED"
         ? "تمت جدولة الحملة"
-        : `أُرسلت الحملة: ${data.campaign.sentCount} نجاح، ${data.campaign.failedCount} فشل`
+        : data.campaign.bodyB
+          ? `أُرسلت الحملة: A — ${data.campaign.sentCount} نجاح و${data.campaign.failedCount} فشل، B — ${data.campaign.sentCountB} نجاح و${data.campaign.failedCountB} فشل`
+          : `أُرسلت الحملة: ${data.campaign.sentCount} نجاح، ${data.campaign.failedCount} فشل`
     );
     setBody("");
+    setBodyB("");
+    setLinkUrlB("");
     setTemplateId("");
     setParams([]);
     setScheduledAt("");
@@ -362,6 +376,40 @@ export function BroadcastClient({
             />
           </div>
 
+          <div className="rounded-md border border-dashed p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              اختبار A/B (اختياري): عبّئة نسخة B لإرسالها لنصف الجمهور
+              ومقارنة النتائج
+            </p>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="bc-body-b">نص نسخة B</Label>
+                <Textarea
+                  id="bc-body-b"
+                  rows={3}
+                  placeholder="نص بديل… — اتركه فارغاً لإرسال النسخة A للجميع"
+                  value={bodyB}
+                  onChange={(e) => setBodyB(e.target.value)}
+                />
+              </div>
+              {bodyB.trim() && (
+                <div>
+                  <Label htmlFor="bc-link-b">
+                    رابط عرض نسخة B (اختياري — يتجاوز رابط النسخة A)
+                  </Label>
+                  <Input
+                    id="bc-link-b"
+                    dir="ltr"
+                    className="mt-1.5"
+                    placeholder="https://example.com/offer-b"
+                    value={linkUrlB}
+                    onChange={(e) => setLinkUrlB(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div>
             <Label htmlFor="bc-scheduled">
               موعد الإرسال (اختياري — فارغ = الآن)
@@ -444,16 +492,38 @@ export function BroadcastClient({
                   {c.body}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {c.sentCount}/{c.totalCount} نجاح
-                  {c.failedCount > 0 && ` — ${c.failedCount} فشل`}
+                  {c.sentCount + c.sentCountB}/{c.totalCount} نجاح
+                  {c.failedCount + c.failedCountB > 0 &&
+                    ` — ${c.failedCount + c.failedCountB} فشل`}
                   {" — "}
                   <span className="inline-flex items-center gap-1">
                     <MousePointerClick className="h-3.5 w-3.5" />
                     {c.clickCount} نقرة
-                    {c.sentCount > 0 &&
-                      ` — نسبة النقر ${((c.clickCount / c.sentCount) * 100).toFixed(1)}٪`}
+                    {c.sentCount + c.sentCountB > 0 &&
+                      ` — نسبة النقر ${((c.clickCount / (c.sentCount + c.sentCountB)) * 100).toFixed(1)}٪`}
                   </span>
                 </p>
+                {(c.bodyB || c.sentCountB + c.failedCountB > 0) && (
+                  <div className="mt-2 space-y-1 rounded-md bg-muted/40 p-2 text-xs">
+                    <p className="font-medium">مقارنة اختبار A/B:</p>
+                    <p className="flex flex-wrap gap-x-4">
+                      <span>
+                        <span className="font-semibold">A:</span> وصل{" "}
+                        {c.sentCount} — فشل {c.failedCount} —{" "}
+                        {c.clickCountA} نقرة
+                        {c.sentCount > 0 &&
+                          ` (${((c.clickCountA / c.sentCount) * 100).toFixed(1)}٪)`}
+                      </span>
+                      <span>
+                        <span className="font-semibold">B:</span> وصل{" "}
+                        {c.sentCountB} — فشل {c.failedCountB} —{" "}
+                        {c.clickCountB} نقرة
+                        {c.sentCountB > 0 &&
+                          ` (${((c.clickCountB / c.sentCountB) * 100).toFixed(1)}٪)`}
+                      </span>
+                    </p>
+                  </div>
+                )}
                 {c.scheduledAt && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     موعد الإرسال:{" "}
@@ -484,7 +554,7 @@ export function BroadcastClient({
                   <div
                     className="h-full bg-primary transition-all"
                     style={{
-                      width: `${c.totalCount > 0 ? (c.sentCount / c.totalCount) * 100 : 0}%`,
+                      width: `${c.totalCount > 0 ? ((c.sentCount + c.sentCountB) / c.totalCount) * 100 : 0}%`,
                     }}
                   />
                 </div>

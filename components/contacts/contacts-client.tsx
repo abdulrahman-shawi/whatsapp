@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Download, GripVertical, Inbox, Loader2, Search } from "lucide-react";
+import { CalendarDays, Download, GripVertical, Inbox, Loader2, Search, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ type ContactRow = {
   name: string | null;
   waPhone: string;
   stage: string;
+  leadScore: number;
   tags: string[];
   notes: string | null;
   createdAt: string;
@@ -28,12 +29,33 @@ type ContactRow = {
   } | null;
 };
 
+// لون شارة النقاط: زمردي ≥70، كهرماني ≥40، رمادي دونه
+function scoreBadgeClass(score: number): string {
+  if (score >= 70) return "bg-emerald-100 text-emerald-700";
+  if (score >= 40) return "bg-amber-100 text-amber-700";
+  return "bg-muted text-muted-foreground";
+}
+
+function ScoreBadge({ score }: { score: number }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${scoreBadgeClass(score)}`}
+      title="نقاط تقييم العميل"
+    >
+      {score}
+    </span>
+  );
+}
+
 // لوحة كانبان لمسار البيع: بحث وفلاتر (وسم) + تصدير CSV + سحب وإفلات لتغيير المرحلة
 export function ContactsClient() {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState("");
+  const [sort, setSort] = useState<"recent" | "score">("recent");
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
   const [savingStage, setSavingStage] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -46,6 +68,7 @@ export function ContactsClient() {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
       if (tag.trim()) params.set("tag", tag.trim());
+      if (sort === "score") params.set("sort", "score");
       const res = await fetch(`/api/contacts?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -54,7 +77,7 @@ export function ContactsClient() {
     } finally {
       setLoading(false);
     }
-  }, [q, tag]);
+  }, [q, tag, sort]);
 
   useEffect(() => {
     const t = setTimeout(load, 300);
@@ -88,6 +111,37 @@ export function ContactsClient() {
     a.download = `العملاء-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // استيراد CSV — يرفع الملف للمسار ثم يعرض ملخص النتيجة ويعيد تحميل القائمة
+  async function importCsv(file: File) {
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/contacts/import", { method: "POST", body: fd });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error ?? "تعذّر استيراد الملف");
+        return;
+      }
+      const lines = [
+        `تم الاستيراد: ${data.imported} عميل جديد`,
+        `تم التحديث: ${data.updated} عميل`,
+      ];
+      if (data.skipped > 0) lines.push(`تم تخطي ${data.skipped} صف`);
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        lines.push("", ...data.errors.slice(0, 20));
+      }
+      alert(lines.join("\n"));
+      void load();
+    } catch {
+      alert("تعذّر استيراد الملف");
+    } finally {
+      setImporting(false);
+      // السماح باختيار الملف نفسه مرة أخرى
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   async function handleDrop(e: React.DragEvent, stage: string) {
@@ -134,10 +188,34 @@ export function ContactsClient() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold">العملاء ({contacts.length})</h1>
-        <Button variant="outline" onClick={exportCsv} disabled={contacts.length === 0}>
-          <Download className="h-4 w-4" />
-          تصدير CSV
-        </Button>
+        <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void importCsv(f);
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
+            استيراد CSV
+          </Button>
+          <Button variant="outline" onClick={exportCsv} disabled={contacts.length === 0}>
+            <Download className="h-4 w-4" />
+            تصدير CSV
+          </Button>
+        </div>
       </div>
 
       {/* الفلاتر */}
@@ -157,6 +235,15 @@ export function ContactsClient() {
           placeholder="وسم…"
           className="w-32"
         />
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value === "score" ? "score" : "recent")}
+          className="rounded-md border bg-background px-2 py-1 text-sm"
+          title="ترتيب القائمة"
+        >
+          <option value="recent">الأحدث إضافةً</option>
+          <option value="score">ترتيب حسب النقاط</option>
+        </select>
       </div>
 
       {loading ? (
@@ -222,10 +309,11 @@ export function ContactsClient() {
                             if (justDragged.current) return;
                             setSelectedId(c.id);
                           }}
-                          className="text-start font-medium hover:text-primary hover:underline"
+                          className="flex min-w-0 items-center gap-1.5 text-start font-medium hover:text-primary hover:underline"
                           title="عرض تفاصيل العميل"
                         >
-                          {c.name ?? c.waPhone}
+                          <span className="truncate">{c.name ?? c.waPhone}</span>
+                          <ScoreBadge score={c.leadScore ?? 0} />
                         </button>
                         <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       </div>

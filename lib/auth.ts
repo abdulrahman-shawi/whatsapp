@@ -5,6 +5,12 @@ import { prisma } from "@/lib/prisma";
 
 // إعدادات NextAuth: تسجيل دخول بالبريد وكلمة المرور مع جلسات JWT
 export const authOptions: NextAuthOptions = {
+  // مفتاح تشفير الجلسات — صريح حتى لا يعتمد NextAuth على لاحقة بيئة Vercel
+  // (‏NEXTAUTH_SECRET_PREVIEW‎ التي تُنسى فينفشل تسجيل الدخول على معاينات Vercel)
+  secret:
+    process.env.NEXTAUTH_SECRET ??
+    process.env.NEXTAUTH_SECRET_PREVIEW ??
+    process.env.NEXTAUTH_SECRET_PRODUCTION,
   providers: [
     CredentialsProvider({
       name: "credentials",

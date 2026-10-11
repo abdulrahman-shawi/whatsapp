@@ -45,12 +45,17 @@ export async function POST(req: Request) {
   }
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
+  const user = await prisma.user.findUnique({
+    where: { id: ctx.userId },
+    select: { email: true },
+  });
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     line_items: [{ price, quantity: 1 }],
     success_url: `${origin}/settings?success=1`,
     cancel_url: `${origin}/settings?canceled=1`,
     client_reference_id: ctx.workspaceId,
+    customer_email: user?.email ?? undefined,
     metadata: { workspaceId: ctx.workspaceId, planId: plan.id },
   });
 

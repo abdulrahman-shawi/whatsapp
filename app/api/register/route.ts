@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { name, email, password, inviteToken } = body ?? {};
+    const { name, email, password, inviteToken, workspaceName } = body ?? {};
 
     if (
       typeof name !== "string" ||
@@ -20,6 +20,17 @@ export async function POST(req: Request) {
     ) {
       return NextResponse.json(
         { error: "يرجى إدخال الاسم والبريد الإلكتروني وكلمة مرور (6 أحرف على الأقل)" },
+        { status: 400 }
+      );
+    }
+
+    if (
+      workspaceName !== undefined &&
+      workspaceName !== null &&
+      (typeof workspaceName !== "string" || workspaceName.trim().length > 60)
+    ) {
+      return NextResponse.json(
+        { error: "اسم النشاط حتى ٦٠ حرفاً" },
         { status: 400 }
       );
     }
@@ -56,7 +67,14 @@ export async function POST(req: Request) {
             : {
                 create: {
                   role: "OWNER",
-                  workspace: { create: { name: `مساحة عمل ${name.trim()}` } },
+                  workspace: {
+                    create: {
+                      name:
+                        typeof workspaceName === "string" && workspaceName.trim()
+                          ? workspaceName.trim()
+                          : `مساحة عمل ${name.trim()}`,
+                    },
+                  },
                 },
               },
         },

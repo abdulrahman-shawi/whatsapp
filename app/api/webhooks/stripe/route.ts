@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { getStripe } from "@/lib/stripe";
+import { getStripeAsync, stripeWebhookSecretAsync } from "@/lib/stripe";
 
 // ويب هوك Stripe العام — بدون مصادقة: يفعّل الباقة ويسجّل الفاتورة عند نجاح الدفع
 export async function POST(req: Request) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  const stripe = getStripe();
+  const secret = await stripeWebhookSecretAsync();
+  const stripe = await getStripeAsync();
   if (!secret || !stripe) {
     return NextResponse.json({ error: "غير مهيأ" }, { status: 500 });
   }

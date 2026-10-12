@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { ensurePlansSeeded } from "@/lib/billing/plans";
-import { getStripe, planPriceEnv, stripeConfigured } from "@/lib/stripe";
+import {
+  getStripeAsync,
+  planPriceAsync,
+  stripeConfiguredAsync,
+} from "@/lib/stripe";
 
 // إنشاء جلسة دفع Stripe لاشتراك باقة — يفعَّل الباقة تلقائياً عبر webhook النجاح
+// مفاتيح Stripe من إعدادات المنصة (لوحة /admin) أو متغيرات البيئة
 export async function POST(req: Request) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
@@ -12,7 +17,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "مالك مساحة العمل فقط" }, { status: 403 });
   }
 
-  if (!stripeConfigured()) {
+  if (!(await stripeConfiguredAsync())) {
     return NextResponse.json(
       { error: "بوابة الدفع غير مضبوطة بعد" },
       { status: 400 }
@@ -31,15 +36,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "باقة غير معروفة" }, { status: 400 });
   }
 
-  const price = planPriceEnv(plan.code);
+  const price = await planPriceAsync(plan.code);
   if (!price) {
     return NextResponse.json(
-      { error: "سعر هذه الباقة غير مضبوط في Stripe" },
+      { error: "سعر هذه الباقة غير مضبوط — أضف معرّف السعر من لوحة المنصة" },
       { status: 400 }
     );
   }
 
-  const stripe = getStripe();
+  const stripe = await getStripeAsync();
   if (!stripe) {
     return NextResponse.json({ error: "بوابة الدفع غير مهيأة" }, { status: 400 });
   }

@@ -16,6 +16,7 @@ export const config = {
     "/contacts/:path*",
     "/bookings/:path*",
     "/reports/:path*",
+    "/admin/:path*",
     "/workflows/:path*",
     "/agents/:path*",
     "/widget/:path*",

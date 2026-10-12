@@ -196,8 +196,8 @@ export function BillingClient({
 
       {!upgradeHref && !stripeConfigured && (
         <p className="text-xs text-muted-foreground">
-          لطلب الترقية تواصل مع مالك المنصة — لضبط رابط واتساب التواصل أضف
-          NEXT_PUBLIC_SUPPORT_WHATSAPP في ملف .env
+          لطلب الترقية تواصل مع مالك المنصة — يُضبط رقم واتساب التواصل من لوحة
+          المنصة ← إعدادات المنصة
         </p>
       )}
 

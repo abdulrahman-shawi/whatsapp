@@ -116,6 +116,7 @@ model Workspace {
   restrictStaff     Boolean             @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
   planId            String?
   plan              Plan?               @relation(fields: [planId], references: [id], onDelete: SetNull)
+  invoices          Invoice[]
 }
 
 // باقة الاشتراك: حدود رسائل وأعضاء ووكلاء لكل مساحة عمل
@@ -131,6 +132,7 @@ model Plan {
   maxAgents    Int         @default(1)
   sortOrder    Int         @default(0)
   workspaces   Workspace[]
+  invoices     Invoice[]
 }
 
 // حملة بث جماعي: رسالة واحدة لكل جهات الاتصال الحاملة لتسمية معينة
@@ -212,6 +214,9 @@ model Invoice {
   stripeSessionId String?  @unique
   stripeInvoiceId String?
   createdAt       DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
 }
 
 // ويب هوك وارد: رابط خارجي (متجر/نظام) يرسل أحداثاً تفتح محادثة وتشغّل سير عمل
@@ -487,6 +492,13 @@ model Setting {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, key])
+}
+
+// إعدادات مالك المنصة على مستوى التطبيق كله (مفاتيح Stripe، رقم الدعم…)
+// تتقدّم على متغيرات البيئة عند وجودها — تُدار من لوحة /admin
+model PlatformSetting {
+  key   String @id
+  value String @db.Text
 }
 
 // سير عمل تلقائي: محفّز + شروط + خطوات متسلسلة تُنفَّذ دون تدخل بشري

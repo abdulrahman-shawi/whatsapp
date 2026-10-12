@@ -156,7 +156,7 @@ export function IntegrationsForm({
                 type={item.secret ? "password" : "text"}
                 dir="ltr"
                 className="text-left"
-                placeholder="اتركه فارغاً لاستخدام قيمة .env"
+                placeholder=""
                 value={draft[item.key] ?? ""}
                 onChange={(e) => {
                   setDraft((prev) => ({ ...prev, [item.key]: e.target.value }));

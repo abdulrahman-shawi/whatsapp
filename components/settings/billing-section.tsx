@@ -6,7 +6,8 @@ import {
   getUsageStatus,
   getWorkspacePlan,
 } from "@/lib/billing/plans";
-import { stripeConfigured } from "@/lib/stripe";
+import { stripeConfiguredAsync } from "@/lib/stripe";
+import { getPlatformConfig } from "@/lib/platform-config";
 import { BillingClient } from "@/components/billing/billing-client";
 
 // بريدات مالك المنصة من .env — مفصولة بفواصل
@@ -74,8 +75,8 @@ export async function BillingSection({
         plans={plans}
         usage={usage}
         isAdmin={isAdmin}
-        supportWhatsapp={process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP ?? ""}
-        stripeConfigured={stripeConfigured()}
+        supportWhatsapp={(await getPlatformConfig()).SUPPORT_WHATSAPP}
+        stripeConfigured={await stripeConfiguredAsync()}
       />
     </div>
   );

@@ -688,14 +688,14 @@ export function ChatWindow({
 
       {/* ملخص المحادثة المولّد بالذكاء الاصطناعي */}
       {summaryOpen && (
-        <div className="border-b bg-violet-50 px-4 py-2">
+        <div className="border-b bg-accent px-4 py-2">
           <div className="mb-1 flex items-center justify-between">
-            <p className="text-xs font-medium text-violet-700">
+            <p className="text-xs font-bold text-accent-foreground">
               ملخص المحادثة — للموظف المتسلم
             </p>
             <div className="flex items-center gap-2">
               <button
-                className="text-xs text-violet-600 hover:underline"
+                className="text-xs text-accent-foreground hover:underline"
                 onClick={() => handleSummarize(true)}
                 disabled={summaryLoading}
               >
@@ -715,7 +715,7 @@ export function ChatWindow({
               يجري تلخيص المحادثة…
             </p>
           ) : (
-            <p className="whitespace-pre-wrap text-sm text-violet-900">
+            <p className="whitespace-pre-wrap text-sm text-accent-foreground">
               {summary ?? "لا ملخص بعد — اضغط تحديث الملخص"}
             </p>
           )}
@@ -725,7 +725,7 @@ export function ChatWindow({
       {/* منطقة الرسائل */}
       <div
         ref={scrollRef}
-        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-muted/30 p-4"
+        className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto bg-[#FAF8F2] p-4"
       >
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
@@ -742,7 +742,7 @@ export function ChatWindow({
               return (
                 <div
                   key={m.id}
-                  className="max-w-[75%] self-stretch rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm shadow-sm"
+                  className="max-w-[80%] self-stretch rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm shadow-sm"
                 >
                   <div className="mb-1 flex items-center gap-1">
                     <StickyNote className="h-3 w-3 text-amber-600" />
@@ -769,10 +769,10 @@ export function ChatWindow({
               <div
                 key={m.id}
                 className={cn(
-                  "max-w-[75%] rounded-lg px-3 py-2 text-sm shadow-sm",
+                  "max-w-[80%] rounded-3xl px-4 py-2.5 text-sm leading-relaxed shadow-sm sm:max-w-[70%]",
                   m.direction === "INBOUND"
-                    ? "self-start border bg-card"
-                    : "self-end bg-[#d9fdd3]"
+                    ? "self-start rounded-br-md border border-border/60 bg-card"
+                    : "self-end rounded-bl-md bg-mint-soft text-navy"
                 )}
               >
                 {/* محتوى الوسائط إن وُجد */}

@@ -44,10 +44,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-sm">
+    <div className="flex min-h-dvh items-center justify-center bg-background p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-3">
+          <span className="grid size-14 place-items-center rounded-3xl bg-navy text-2xl font-black text-mint shadow-[0_12px_32px_-10px_rgba(18,20,31,0.4)]">
+            رَدّ
+          </span>
+          <p className="text-sm text-muted-foreground">منصة الرد الآلي الذكي على واتساب</p>
+        </div>
+        <Card className="w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">تسجيل الدخول</CardTitle>
+          <CardTitle className="text-2xl font-extrabold">تسجيل الدخول</CardTitle>
           <CardDescription>أدخل بياناتك للوصول إلى لوحة التحكم</CardDescription>
         </CardHeader>
         <CardContent>
@@ -88,12 +95,13 @@ export default function LoginPage() {
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             ليس لديك حساب؟{" "}
-            <Link href="/register" className="text-primary hover:underline">
+            <Link href="/register" className="font-bold text-primary hover:underline">
               إنشاء حساب
             </Link>
           </p>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

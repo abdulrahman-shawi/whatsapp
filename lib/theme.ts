@@ -2,8 +2,8 @@ import { prisma } from "@/lib/prisma";
 
 // مفتاح إعداد لون العلامة في جدول Setting — لكل مساحة عمل صف واحد بمفتاح "theme"
 export const THEME_KEY = "theme";
-// اللون الافتراضي — نفس بنفسج globals.css عند غياب الإعداد
-export const DEFAULT_THEME_COLOR = "#7c3aed";
+// اللون الافتراضي — نفس زمردي globals.css عند غياب الإعداد
+export const DEFAULT_THEME_COLOR = "#06D6A0";
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 

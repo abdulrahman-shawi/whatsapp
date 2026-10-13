@@ -2,27 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
-/* متغيرات التصميم: خلفية بيضاء ولون أساسي بنفسجي */
+/* متغيرات التصميم: خلفية ورقية دافئة، نص فحمي، لون أساسي زمردي، شريط جانبي كحلي */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 224 71% 4%;
+    --background: 45 33% 95%;
+    --foreground: 0 4% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 224 71% 4%;
-    --primary: 262 83% 58%;
-    --primary-foreground: 210 20% 98%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 220 13% 18%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 262 83% 96%;
-    --accent-foreground: 262 83% 40%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 20% 98%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 262 83% 58%;
-    --radius: 0.5rem;
+    --card-foreground: 0 4% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 4% 11%;
+    --primary: 163 95% 43%;
+    --primary-foreground: 228 26% 10%;
+    --secondary: 45 20% 90%;
+    --secondary-foreground: 0 4% 11%;
+    --muted: 45 20% 91%;
+    --muted-foreground: 0 3% 42%;
+    --accent: 163 60% 94%;
+    --accent-foreground: 163 80% 20%;
+    --destructive: 6 80% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 40 12% 85%;
+    --input: 40 12% 85%;
+    --ring: 163 95% 43%;
+    --radius: 0.75rem;
+    /* ألوان الشريط الجانبي الكحلي */
+    --sidebar: 228 26% 10%;
+    --sidebar-foreground: 230 12% 68%;
+    --sidebar-accent: 228 20% 16%;
+    --sidebar-border: 228 18% 18%;
   }
 }
 
@@ -32,12 +39,69 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Geist للأرقام والإنجليزية مع بدائل مناسبة للعربية */
+    /* Tajawal للعربية مع Geist للأرقام والإنجليزية */
     font-family:
+      var(--font-tajawal),
       var(--font-geist-sans),
       "Segoe UI",
       Tahoma,
       Arial,
       sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
+  /* تظليل النص المحدد بالزمردي */
+  ::selection {
+    background: #06d6a0;
+    color: #1c1a1a;
+  }
+  /* شريط تمرير رفيع بلون دافئ */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #d4d0c4;
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #b8b3a4;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* أرقام إنجليزية بخط Geist بعرض ثابت */
+.font-num {
+  font-family: var(--font-geist-sans), var(--font-tajawal), sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+/* نبض نقطة حالة الاتصال */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(6, 214, 160, 0.55);
+  }
+  60% {
+    box-shadow: 0 0 0 7px rgba(6, 214, 160, 0);
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 2.2s ease-out infinite;
+}
+
+/* ظهور تدريجي للعناصر */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise-in {
+  animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

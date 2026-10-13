@@ -48,10 +48,10 @@ export function WorkspaceSwitcher({
   if (workspaces.length === 0) return null;
 
   return (
-    <div className="mb-4">
+    <div className="mb-2">
       <label
         htmlFor="workspace-switcher"
-        className="mb-1 flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+        className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-bold text-white/30"
       >
         <Building2 className="h-3.5 w-3.5" />
         مساحة العمل
@@ -61,7 +61,7 @@ export function WorkspaceSwitcher({
         value={currentId}
         onChange={onChange}
         disabled={switching}
-        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-1 text-sm font-bold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint disabled:cursor-not-allowed disabled:opacity-50 [&>option]:text-navy"
       >
         {workspaces.map((w) => (
           <option key={w.id} value={w.id}>

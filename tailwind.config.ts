@@ -9,7 +9,7 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      // ألوان مبنية على متغيرات CSS (نمط shadcn) — اللون الأساسي بنفسجي
+      // ألوان مبنية على متغيرات CSS (نمط shadcn) — اللون الأساسي زمردي
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -39,6 +39,26 @@ const config: Config = {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        // ألوان الهوية الجديدة
+        mint: {
+          DEFAULT: "#06D6A0",
+          dark: "#059E78",
+          soft: "#E2FAF1",
+        },
+        navy: {
+          DEFAULT: "#12141F",
+          soft: "#1B1E2E",
+          line: "#262A3E",
+        },
+        saffron: "#F5A623",
+        tomato: "#EA4C3C",
+        royal: "#4D65FF",
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar))",
+          foreground: "hsl(var(--sidebar-foreground))",
+          accent: "hsl(var(--sidebar-accent))",
+          border: "hsl(var(--sidebar-border))",
         },
       },
       borderRadius: {

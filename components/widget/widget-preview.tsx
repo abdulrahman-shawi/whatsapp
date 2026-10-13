@@ -177,7 +177,7 @@ export function WidgetPreview({
               className={cn(
                 "max-w-[78%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm",
                 m.role === "visitor"
-                  ? "self-end bg-[#d9fdd3]"
+                  ? "self-end rounded-bl-md bg-mint-soft text-navy"
                   : "self-start border bg-card"
               )}
             >

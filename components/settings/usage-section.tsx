@@ -63,7 +63,7 @@ export async function UsageSection({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
       {usageStatus.tokens.percent >= 80 && (
-        <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-700">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-accent px-4 py-3 text-sm text-accent-foreground">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           اقترب استهلاك الذكاء الاصطناعي من حده — {usageStatus.tokens.percent}٪ من التوكنات الشهرية.
         </div>
@@ -100,7 +100,7 @@ export async function UsageSection({ workspaceId }: { workspaceId: string }) {
           <CardContent>
             <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full rounded-full transition-all bg-violet-400"
+                className="h-full rounded-full transition-all bg-primary"
                 style={{ width: `${usageStatus.tokens.percent}%` }}
               />
             </div>

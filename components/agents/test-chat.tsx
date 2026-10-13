@@ -73,7 +73,7 @@ export function TestChat({
             className={cn(
               "max-w-[80%] rounded-lg px-3 py-2 text-sm",
               m.role === "user"
-                ? "self-end bg-[#d9fdd3]"
+                ? "self-end rounded-bl-md bg-mint-soft text-navy"
                 : "self-start border bg-card"
             )}
           >

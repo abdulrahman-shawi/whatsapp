@@ -157,7 +157,7 @@ export function TrainingClient({
                       </span>
                       {pair.question.body}
                     </div>
-                    <div className="rounded-md bg-[#d9fdd3] p-2.5 text-sm">
+                    <div className="rounded-2xl rounded-bl-md bg-mint-soft p-3 text-sm">
                       <span className="mb-1 block text-xs text-muted-foreground">
                         رد الوكيل ({messageTime(pair.answer.createdAt)}):
                       </span>

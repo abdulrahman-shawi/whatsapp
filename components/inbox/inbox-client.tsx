@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessagesSquare } from "lucide-react";
 import { getPusherInstance, initPusherClient, type Channel } from "@/lib/pusher-client";
+import { cn } from "@/lib/utils";
 import { ConversationList } from "./conversation-list";
 import { ChatWindow } from "./chat-window";
 import { ContactPanel } from "./contact-panel";
@@ -370,9 +371,14 @@ export function InboxClient({
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] overflow-hidden rounded-xl border bg-card">
-      {/* قائمة المحادثات — تظهر يميناً في RTL */}
-      <div className="w-80 shrink-0 border-e">
+    <div className="flex h-[calc(100dvh-8rem)] gap-4 overflow-hidden">
+      {/* قائمة المحادثات — تظهر يميناً في RTL، تُخفى على الجوال عند فتح محادثة */}
+      <div
+        className={cn(
+          "w-full shrink-0 overflow-hidden rounded-3xl border border-border/70 bg-card lg:w-80",
+          selectedId && "hidden lg:block"
+        )}
+      >
         <ConversationList
           conversations={visibleConversations}
           selectedId={selectedId}
@@ -392,7 +398,12 @@ export function InboxClient({
       </div>
 
       {/* نافذة المحادثة */}
-      <div className="min-w-0 flex-1 overflow-hidden">
+      <div
+        className={cn(
+          "min-w-0 flex-1 overflow-hidden rounded-3xl border border-border/70 bg-card",
+          !selectedId && "hidden lg:block"
+        )}
+      >
         {selected ? (
           <ChatWindow
             conversation={selected}
@@ -411,15 +422,18 @@ export function InboxClient({
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <MessagesSquare className="h-10 w-10" />
-            <p>اختر محادثة لعرضها</p>
+            <span className="grid size-16 place-items-center rounded-3xl bg-mint-soft">
+              <MessagesSquare className="size-7 text-mint-dark" />
+            </span>
+            <p className="font-bold text-foreground">اختر محادثة لعرضها</p>
+            <p className="text-sm">الوكيل الذكي يرد تلقائياً، ويمكنك التدخل في أي وقت</p>
           </div>
         )}
       </div>
 
-      {/* لوحة جهة الاتصال — تظهر يساراً في RTL */}
+      {/* لوحة جهة الاتصال — تظهر يساراً في RTL على الشاشات الواسعة */}
       {selected && (
-        <div className="w-72 shrink-0 border-s">
+        <div className="hidden w-72 shrink-0 overflow-y-auto rounded-3xl border border-border/70 bg-card xl:block">
           <ContactPanel
             contact={selected.contact}
             onSave={handleUpdateContact}

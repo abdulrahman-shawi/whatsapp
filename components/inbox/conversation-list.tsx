@@ -82,8 +82,8 @@ export function ConversationList({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b p-3">
-        <h2 className="font-semibold">{viewTitles[view]}</h2>
+      <div className="flex items-center justify-between border-b border-border/60 p-3">
+        <h2 className="font-extrabold">{viewTitles[view]}</h2>
         <div className="flex items-center gap-1">
           {view !== "followups" && (
             <Button
@@ -133,7 +133,7 @@ export function ConversationList({
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="بحث في المحادثات والرسائل… (Ctrl+K)"
-            className="w-full rounded-md border bg-background py-1.5 ps-8 pe-7 text-sm"
+            className="w-full rounded-full border border-border bg-background py-2 ps-9 pe-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           {query && (
             <button
@@ -153,7 +153,7 @@ export function ConversationList({
           <select
             value={filter}
             onChange={(e) => onFilterChange(e.target.value as AssignmentFilter)}
-            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            className="w-full rounded-full border border-border bg-background px-3.5 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="all">الكل</option>
             <option value="mine">محادثاتي</option>
@@ -162,7 +162,7 @@ export function ConversationList({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto p-2">
         {query.trim().length >= 2 && conversations.length === 0 && !searching ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
             لا نتائج مطابقة لبحثك
@@ -176,25 +176,38 @@ export function ConversationList({
         ) : (
           conversations.map((c) => {
             const status = statusConfig[c.status];
+            const displayName = c.contact.name ?? c.contact.waPhone;
             return (
               <button
                 key={c.id}
                 onClick={() => onSelect(c.id)}
                 className={cn(
-                  "flex w-full flex-col gap-1 border-b p-3 text-start transition-colors hover:bg-muted/50",
+                  "flex w-full min-h-14 flex-col gap-1 rounded-2xl p-3 text-start transition-colors hover:bg-muted/60",
                   selectedId === c.id && "bg-accent"
                 )}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-2 font-medium">
-                    <span className="truncate">
-                      {c.contact.name ?? c.contact.waPhone}
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2 font-bold">
+                    {/* أفاتار بالحرف الأول بلون ثابت مشتق من الاسم */}
+                    <span
+                      className="grid size-9 shrink-0 select-none place-items-center rounded-full text-xs font-black text-white"
+                      style={{
+                        backgroundColor:
+                          ["#06D6A0", "#4D65FF", "#F5A623", "#EA4C3C", "#8B5CF6", "#0EA5E9"][
+                            Math.abs(
+                              [...displayName].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7)
+                            ) % 6
+                          ],
+                      }}
+                    >
+                      {displayName.trim()[0] ?? "؟"}
                     </span>
+                    <span className="truncate">{displayName}</span>
                     <span className="shrink-0 rounded-full border px-1.5 py-0.5">
                       <StageBadge stage={c.contact.stage} />
                     </span>
                   </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
+                  <span className="font-num shrink-0 text-[10.5px] text-muted-foreground">
                     {relativeTime(c.lastMessageAt)}
                   </span>
                 </div>
@@ -205,7 +218,7 @@ export function ConversationList({
                       : "لا توجد رسائل"}
                   </span>
                   {c.unreadCount > 0 && (
-                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-bold text-primary-foreground">
+                    <span className="font-num flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">
                       {c.unreadCount}
                     </span>
                   )}

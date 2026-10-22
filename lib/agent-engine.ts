@@ -1,7 +1,12 @@
 import type { Agent, KnowledgeSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
-import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
+import { downloadMetaAudio, transcribeAudio } from "@/lib/audio-transcription";
+import {
+  resolveWhatsAppCreds,
+  sendWhatsAppMessage,
+  type WhatsAppCreds,
+} from "@/lib/whatsapp";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
@@ -594,6 +599,52 @@ export async function handleIncomingWhatsAppMessage(input: {
           where: { isActive: true },
           include: { knowledgeSources: true },
         });
+    const workspaceId = input.workspaceId ?? agent?.workspaceId;
+    let text = input.text;
+    let waCreds: WhatsAppCreds | null = null;
+    if (workspaceId && input.media?.mediaType === "audio") {
+      waCreds = await resolveWhatsAppCreds(workspaceId);
+    }
+
+    if (
+      input.media?.mediaType === "audio" &&
+      !input.media.mediaId.startsWith("asset:") &&
+      !/^https?:\/\//i.test(input.media.mediaId) &&
+      workspaceId &&
+      waCreds?.provider === "meta"
+    ) {
+      try {
+        const [aiConfig, provider, configuredModel] = await Promise.all([
+          resolveAiConfig(workspaceId),
+          getIntegration(workspaceId, "AI_PROVIDER"),
+          getIntegration(workspaceId, "AI_MODEL"),
+        ]);
+        const transcriptionProvider = provider ?? "openai";
+        if (transcriptionProvider !== "openai" && transcriptionProvider !== "gemini") {
+          throw new Error(
+            `تفريغ الرسائل الصوتية غير مدعوم لمزوّد الذكاء الاصطناعي "${transcriptionProvider}"`
+          );
+        }
+        if (!aiConfig.apiKey) {
+          throw new Error("مفتاح OPENAI_API_KEY غير مضبوط لتفريغ الرسائل الصوتية");
+        }
+
+        const audio = await downloadMetaAudio(input.media.mediaId, waCreds.token);
+        const transcript = await transcribeAudio(audio.buffer, audio.mime, {
+          apiKey: aiConfig.apiKey,
+          provider: transcriptionProvider,
+          model:
+            transcriptionProvider === "openai"
+              ? "whisper-1"
+              : configuredModel || aiConfig.model,
+        });
+        const caption = text === "[رسالة صوتية]" ? "" : text.trim();
+        text = [caption, transcript].filter(Boolean).join("\n\n");
+      } catch (e) {
+        console.error("[agent-engine] تعذّر تفريغ الرسالة الصوتية:", e);
+      }
+    }
+
     if (!agent) {
       if (input.workspaceId) {
         console.warn(
@@ -601,20 +652,20 @@ export async function handleIncomingWhatsAppMessage(input: {
         );
       }
       // لا يوجد وكيل نشط — نحفظ الرسالة في صندوق الوارد دون رد آلي حتى لا تضيع
-      await storeInboundWithoutAgent(input);
+      await storeInboundWithoutAgent({ ...input, text });
       return;
     }
 
     // بيانات واتساب من إعدادات مساحة العمل مع .env كبديل
     // ميتا أولاً، وإن كانت حقوله فارغة نستخدم UltraMsg
-    const waCreds = await resolveWhatsAppCreds(agent.workspaceId);
+    waCreds ??= await resolveWhatsAppCreds(agent.workspaceId);
 
     await runPipeline({
       workspaceId: agent.workspaceId,
       agent,
       waPhone: input.waPhone,
       contactName: input.contactName,
-      text: input.text,
+      text,
       platform: "WHATSAPP",
       media: input.media,
       sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),

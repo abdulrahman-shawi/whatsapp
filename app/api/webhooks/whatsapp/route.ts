@@ -5,6 +5,8 @@ import {
   resolveWorkspaceByPhoneNumberId,
 } from "@/lib/settings";
 
+export const maxDuration = 60;
+
 // أنواع مبسطة لبنية حمولة ميتا التي نحتاجها
 interface MetaMedia {
   id?: string;

@@ -167,15 +167,16 @@ export async function POST(req: Request, { params }: Params) {
     data: { lastMessageAt: new Date() },
   });
 
-  // ويب هوك صادر: رسالة صادرة مخزنة من الموظف — بما فيها الملاحظات الداخلية
-  fireOutboundEvent(ctx.workspaceId, "message.created", {
-    id: message.id,
-    direction: message.direction,
-    body: bodyText.length > 500 ? `${bodyText.slice(0, 500)}…` : bodyText,
-    from: conversation.contact.waPhone,
-    conversationId: params.id,
-    senderType: message.senderType,
-  });
+  if (!isNote) {
+    fireOutboundEvent(ctx.workspaceId, "message.created", {
+      id: message.id,
+      direction: message.direction,
+      body: bodyText.length > 500 ? `${bodyText.slice(0, 500)}…` : bodyText,
+      from: conversation.contact.waPhone,
+      conversationId: params.id,
+      senderType: message.senderType,
+    });
+  }
 
   // بث فوري عبر Pusher — لا يؤثر على شيء إن لم يكن مفعّلاً
   triggerNewMessage(ctx.workspaceId, params.id, serialize(message));

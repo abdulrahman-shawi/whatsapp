@@ -50,17 +50,22 @@ export const INTEGRATION_KEYS = [
   },
   {
     key: "BUSINESS_HOURS_START",
-    label: "بداية ساعات العمل (ساعة 0-23) — لشرط سير العمل",
+    label: "بداية ساعات العمل (ساعة 0-23)",
     env: [],
   },
   {
     key: "BUSINESS_HOURS_END",
-    label: "نهاية ساعات العمل (ساعة 0-23) — لشرط سير العمل",
+    label: "نهاية ساعات العمل (ساعة 0-23)",
     env: [],
   },
   {
     key: "BUSINESS_HOURS_DAYS",
     label: "أيام العمل (أرقام مفصولة بفواصل: 0=أحد … 6=سبت — اتركها فارغة لكل الأيام)",
+    env: [],
+  },
+  {
+    key: "BUSINESS_HOURS_TIMEZONE",
+    label: "المنطقة الزمنية لساعات العمل (مثال: Asia/Riyadh)",
     env: [],
   },
 ] as const;
@@ -75,6 +80,7 @@ const NON_SECRET = new Set<string>([
   "BUSINESS_HOURS_START",
   "BUSINESS_HOURS_END",
   "BUSINESS_HOURS_DAYS",
+  "BUSINESS_HOURS_TIMEZONE",
 ]);
 
 // خيارات القائمة المنسدلة للمفاتيح التي تُختار من قائمة بدل الإدخال الحر

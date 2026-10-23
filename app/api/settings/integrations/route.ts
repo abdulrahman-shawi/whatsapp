@@ -35,7 +35,44 @@ export async function PUT(req: Request) {
       );
     }
 
-    if (value.trim() === "") {
+    const normalizedValue = value.trim();
+    if (
+      (key === "BUSINESS_HOURS_START" || key === "BUSINESS_HOURS_END") &&
+      normalizedValue &&
+      (!/^\d{1,2}$/.test(normalizedValue) ||
+        Number(normalizedValue) < 0 ||
+        Number(normalizedValue) > 23)
+    ) {
+      return NextResponse.json(
+        { error: "ساعات العمل يجب أن تكون أرقاماً صحيحة بين 0 و23" },
+        { status: 400 }
+      );
+    }
+    if (
+      key === "BUSINESS_HOURS_DAYS" &&
+      normalizedValue &&
+      normalizedValue.split(",").some((day) => !/^[0-6]$/.test(day.trim()))
+    ) {
+      return NextResponse.json(
+        { error: "أيام العمل يجب أن تكون أرقاماً من 0 إلى 6 مفصولة بفواصل" },
+        { status: 400 }
+      );
+    }
+    if (
+      key === "BUSINESS_HOURS_TIMEZONE" &&
+      normalizedValue
+    ) {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: normalizedValue }).format();
+      } catch {
+        return NextResponse.json(
+          { error: "المنطقة الزمنية غير صالحة، مثال: Asia/Riyadh" },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (normalizedValue === "") {
       // مسح صريح — حذف التجاوز والعودة لقيمة .env
       await prisma.setting.deleteMany({
         where: { workspaceId: ctx.workspaceId, key },
@@ -43,8 +80,8 @@ export async function PUT(req: Request) {
     } else {
       await prisma.setting.upsert({
         where: { workspaceId_key: { workspaceId: ctx.workspaceId, key } },
-        update: { value: value.trim() },
-        create: { workspaceId: ctx.workspaceId, key, value: value.trim() },
+        update: { value: normalizedValue },
+        create: { workspaceId: ctx.workspaceId, key, value: normalizedValue },
       });
     }
   }

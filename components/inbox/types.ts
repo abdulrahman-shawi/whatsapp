@@ -18,11 +18,14 @@ export type MemberInfo = {
 export type ConversationStatus = "AI" | "MANUAL" | "HANDED_OFF";
 export type Platform = "WHATSAPP" | "WIDGET" | "TELEGRAM" | "MESSENGER" | "INSTAGRAM";
 export type AssignmentFilter = "all" | "mine" | "unassigned";
+export type ConversationTopic = "INQUIRY" | "COMPLAINT" | "BOOKING" | "QUOTE";
 
 export type ConversationListItem = {
   id: string;
   workspaceId: string;
   status: ConversationStatus;
+  isCritical: boolean;
+  criticalAt: string | null;
   platform: Platform;
   isArchived: boolean;
   agentId: string | null;
@@ -38,6 +41,7 @@ export type ConversationListItem = {
   csatRating: number | null;
   // مزاج/نية العميل: INTERESTED | ANGRY | PRICE | NEUTRAL
   sentiment: string | null;
+  topic: ConversationTopic | null;
   // ملخص المحادثة المولّد بالذكاء الاصطناعي (إن وُجد)
   summary: string | null;
   lastMessageAt: string;

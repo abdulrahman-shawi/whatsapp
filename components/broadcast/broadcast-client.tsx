@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { relativeTime } from "@/lib/time";
 import { CONTACT_STAGES } from "@/lib/contact-stages";
+import { getTemplateVariableIndexes, validateTemplateParams } from "@/lib/broadcast-templates";
 import type { TemplateInfo } from "@/components/inbox/types";
 
 type Campaign = {
@@ -80,17 +81,24 @@ export function BroadcastClient({
 
   // القالب المختار ومتغيراته {{n}} مرتبة برقم المتغير
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
-  const templateVars: number[] = selectedTemplate
-    ? [
-        ...new Set(
-          [...selectedTemplate.body.matchAll(/\{\{(\d+)\}\}/g)].map((m) =>
-            Number(m[1])
-          )
-        ),
-      ].sort((a, b) => a - b)
+  const templateVars = selectedTemplate
+    ? getTemplateVariableIndexes(selectedTemplate.body)
     : [];
 
   async function handleLaunch() {
+    if (selectedTemplate) {
+      const paramsError = validateTemplateParams(
+        selectedTemplate.body,
+        templateVars.map((index) => params[index - 1] ?? "")
+      );
+      if (paramsError) {
+        setError(paramsError);
+        return;
+      }
+    } else if (!body.trim()) {
+      setError("نص الرسالة مطلوب عند عدم اختيار قالب Meta");
+      return;
+    }
     setSending(true);
     setError("");
     setResult("");
@@ -104,7 +112,7 @@ export function BroadcastClient({
           inactiveDays: Number(inactiveDays) > 0 ? Number(inactiveDays) : null,
         },
         linkUrl: linkUrl.trim() || null,
-        body,
+        body: selectedTemplate?.body ?? body,
         bodyB: bodyB.trim() || null,
         linkUrlB: linkUrlB.trim() || null,
         templateId: templateId || null,
@@ -299,29 +307,37 @@ export function BroadcastClient({
             )}
           </div>
 
-          <div>
-            <Label htmlFor="bc-link">رابط العرض (اختياري — لتتبّع النقرات)</Label>
-            <Input
-              id="bc-link"
-              dir="ltr"
-              className="mt-1.5"
-              placeholder="https://example.com/offer"
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              ضع {"{{link}}"} في نص الرسالة وسيتحول لرابط تتبّع لكل عميل
-            </p>
-          </div>
+          {!templateId && (
+            <div>
+              <Label htmlFor="bc-link">رابط العرض (اختياري — لتتبّع النقرات)</Label>
+              <Input
+                id="bc-link"
+                dir="ltr"
+                className="mt-1.5"
+                placeholder="https://example.com/offer"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                ضع {"{{link}}"} في نص الرسالة وسيتحول لرابط تتبّع لكل عميل
+              </p>
+            </div>
+          )}
 
           <div>
-            <Label htmlFor="bc-template">قالب ميتا (اختياري — للبث الواسع)</Label>
+            <Label htmlFor="bc-template">قالب مسجل في Meta (اختياري — للبث خارج نافذة ٢٤ ساعة)</Label>
             <select
               id="bc-template"
               value={templateId}
               onChange={(e) => {
-                setTemplateId(e.target.value);
+                const nextTemplateId = e.target.value;
+                const nextTemplate = templates.find((t) => t.id === nextTemplateId);
+                setTemplateId(nextTemplateId);
                 setParams([]);
+                setBody(nextTemplate?.body ?? "");
+                setBodyB("");
+                setLinkUrl("");
+                setLinkUrlB("");
               }}
               className="mt-1.5 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
@@ -333,9 +349,8 @@ export function BroadcastClient({
               ))}
             </select>
             {templateId && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                سيُرسل القالب كما هو معتمداً في ميتا مع تعبئة متغيراته — نص
-                الحقل أدناه للمعاينة فقط
+              <p className="mt-1 text-xs text-muted-foreground" dir="auto">
+                أضف في الإعدادات قالباً معتمداً مسبقاً، وتأكد من مطابقة الاسم واللغة؛ هذه معاينة فقط ولا يمكن تعديل نص القالب هنا.
               </p>
             )}
           </div>
@@ -365,50 +380,61 @@ export function BroadcastClient({
             </div>
           )}
 
-          <div>
-            <Label htmlFor="bc-body">نص الرسالة</Label>
-            <Textarea
-              id="bc-body"
-              rows={4}
-              placeholder="اكتب رسالتك…"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-            />
-          </div>
+          {selectedTemplate ? (
+            <div className="rounded-md border bg-muted/30 p-3">
+              <Label>معاينة القالب</Label>
+              <p className="mt-1 whitespace-pre-wrap text-sm" dir="auto">
+                {selectedTemplate.body}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <Label htmlFor="bc-body">نص الرسالة</Label>
+              <Textarea
+                id="bc-body"
+                rows={4}
+                placeholder="اكتب رسالتك…"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+              />
+            </div>
+          )}
 
-          <div className="rounded-md border border-dashed p-3">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">
-              اختبار A/B (اختياري): عبّئة نسخة B لإرسالها لنصف الجمهور
-              ومقارنة النتائج
-            </p>
-            <div className="space-y-3">
-              <div>
-                <Label htmlFor="bc-body-b">نص نسخة B</Label>
-                <Textarea
-                  id="bc-body-b"
-                  rows={3}
-                  placeholder="نص بديل… — اتركه فارغاً لإرسال النسخة A للجميع"
-                  value={bodyB}
-                  onChange={(e) => setBodyB(e.target.value)}
-                />
-              </div>
-              {bodyB.trim() && (
+          {!templateId && (
+            <div className="rounded-md border border-dashed p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                اختبار A/B (اختياري): عبّئة نسخة B لإرسالها لنصف الجمهور
+                ومقارنة النتائج
+              </p>
+              <div className="space-y-3">
                 <div>
-                  <Label htmlFor="bc-link-b">
-                    رابط عرض نسخة B (اختياري — يتجاوز رابط النسخة A)
-                  </Label>
-                  <Input
-                    id="bc-link-b"
-                    dir="ltr"
-                    className="mt-1.5"
-                    placeholder="https://example.com/offer-b"
-                    value={linkUrlB}
-                    onChange={(e) => setLinkUrlB(e.target.value)}
+                  <Label htmlFor="bc-body-b">نص نسخة B</Label>
+                  <Textarea
+                    id="bc-body-b"
+                    rows={3}
+                    placeholder="نص بديل… — اتركه فارغاً لإرسال النسخة A للجميع"
+                    value={bodyB}
+                    onChange={(e) => setBodyB(e.target.value)}
                   />
                 </div>
-              )}
+                {bodyB.trim() && (
+                  <div>
+                    <Label htmlFor="bc-link-b">
+                      رابط عرض نسخة B (اختياري — يتجاوز رابط النسخة A)
+                    </Label>
+                    <Input
+                      id="bc-link-b"
+                      dir="ltr"
+                      className="mt-1.5"
+                      placeholder="https://example.com/offer-b"
+                      value={linkUrlB}
+                      onChange={(e) => setLinkUrlB(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <Label htmlFor="bc-scheduled">
@@ -435,6 +461,11 @@ export function BroadcastClient({
               </p>
             </>
           )}
+          {templateId && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              تأكد من وجود موافقة مسبقة من العميل على الرسائل التسويقية. ستُستبعد جهات الاتصال المحظورة تلقائياً.
+            </p>
+          )}
 
           {error && (
             <p className="text-sm text-destructive" role="alert">
@@ -447,7 +478,7 @@ export function BroadcastClient({
 
           <Button
             onClick={handleLaunch}
-            disabled={sending || !hasCriterion || !body.trim()}
+            disabled={sending || !hasCriterion || (!templateId && !body.trim())}
           >
             {sending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

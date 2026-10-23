@@ -4,18 +4,29 @@ import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { downloadMetaAudio, transcribeAudio } from "@/lib/audio-transcription";
 import {
   resolveWhatsAppCreds,
+  sendWhatsAppMedia,
   sendWhatsAppMessage,
+  uploadWhatsAppMedia,
   type WhatsAppCreds,
 } from "@/lib/whatsapp";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
-import { triggerWorkflows, isBusinessHours } from "@/lib/workflows";
+import { triggerWorkflows, getWorkspaceBusinessHours } from "@/lib/workflows";
 import { getIntegration } from "@/lib/settings";
-import { detectLanguage, detectSentiment, LANGUAGE_NAMES } from "@/lib/sentiment";
+import {
+  detectConversationTopic,
+  detectLanguage,
+  isCriticalMessage,
+  detectSentiment,
+  LANGUAGE_NAMES,
+} from "@/lib/sentiment";
 import { notifyUser } from "@/lib/notify";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 import { recalculateLeadScore } from "@/lib/scoring";
+import { escalateCriticalConversation } from "@/lib/critical-conversations";
+import { synthesizeVoiceReply } from "@/lib/text-to-speech";
+import { parseCsatRating } from "@/lib/csat";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -112,14 +123,6 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-// تحليل إجابة تقييم الرضا: يقبل ١-٥ بالأرقام اللاتينية أو العربية المشرقية
-// مع تجاهل المسافات المحيطة — يعيد الرقم أو null إن لم يكن النص تقييماً
-function parseCsatRating(text: string): number | null {
-  const latin = text.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
-  const match = /^\s*([1-5])\s*$/.exec(latin);
-  return match ? Number(match[1]) : null;
-}
-
 type PipelineOptions = {
   workspaceId: string;
   agent: AgentWithKnowledge;
@@ -130,7 +133,36 @@ type PipelineOptions = {
   conversationId?: string;
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
   sendReply: (to: string, body: string) => Promise<unknown>;
+  sendVoiceReply?: (
+    to: string,
+    audio: Buffer
+  ) => Promise<{ sent: boolean; mediaId: string | null }>;
 };
+
+async function sendAgentReply(
+  opts: PipelineOptions,
+  agent: AgentWithKnowledge,
+  to: string,
+  body: string
+): Promise<{ voiceSent: boolean; mediaId: string | null }> {
+  if (agent.voiceReplies && opts.platform === "WHATSAPP" && opts.sendVoiceReply) {
+    const audio = await synthesizeVoiceReply(
+      body,
+      await resolveAiConfig(opts.workspaceId)
+    );
+    if (audio) {
+      try {
+        const result = await opts.sendVoiceReply(to, audio);
+        if (result.sent) return { voiceSent: true, mediaId: result.mediaId };
+        console.error("[agent-engine] فشل إرسال الرد الصوتي؛ سيُرسل كنص");
+      } catch (error) {
+        console.error("[agent-engine] تعذّر إرسال الرد الصوتي؛ سيُرسل كنص:", error);
+      }
+    }
+  }
+  await opts.sendReply(to, body);
+  return { voiceSent: false, mediaId: null };
+}
 
 // خط معالجة الرسالة الواردة المشترك بين واتساب والويدجت
 async function runPipeline(
@@ -230,8 +262,17 @@ async function runPipeline(
       lastMessageAt: new Date(),
       closedAt: isCsatAnswer ? conversation.closedAt : null,
       sentiment: detectSentiment(text),
+      topic: isCsatAnswer ? conversation.topic : detectConversationTopic(text),
     },
   });
+  if (!isCsatAnswer && isCriticalMessage(text)) {
+    await escalateCriticalConversation(
+      workspaceId,
+      conversation.id
+    ).catch((error) => {
+      console.error("[agent-engine] تعذّر تصعيد المحادثة الحرجة:", error);
+    });
+  }
 
   // بث فوري لصندوق الوارد — لا يؤثر على شيء إن لم يكن Pusher مفعّلاً
   triggerNewMessage(workspaceId, conversation.id, inboundMsg);
@@ -346,28 +387,35 @@ async function runPipeline(
     return { conversationId: conversation.id, reply: null, status: "HANDED_OFF" };
   }
 
-  // ٧.ج الرد خارج أوقات الدوام: إذا ضُبطت ساعات العمل في الإعدادات وكان الوقت خارجها،
-  // نرسل نص offHoursReply ثابتاً بدل الرد الذكي (دون استدعاء OpenAI) — يُحسب رصيد رسالة كالمعتاد.
+  // ٧.ج خارج الدوام نرسل رسالة ثابتة بدلاً من استدعاء الذكاء الاصطناعي.
   // لا يصل هذا الفرع إلا لمحادثات حالتها AI (المسلَّمة/اليدوية تتوقف عند الفحص أعلاه)،
   // ويمر عبر نفس مسار الإرسال والتخزين والبث الذي يمر به الرد الذكي
-  if (agent.offHoursReply?.trim()) {
-    const [bhStart, bhEnd] = await Promise.all([
-      getIntegration(workspaceId, "BUSINESS_HOURS_START"),
-      getIntegration(workspaceId, "BUSINESS_HOURS_END"),
-    ]);
-    // غير مضبوط في الإعدادات → السلوك القديم تماماً (بلا قيد على الرد الآلي)
-    if ((bhStart || bhEnd) && !(await isBusinessHours(workspaceId))) {
+  {
+    const businessHours = await getWorkspaceBusinessHours(workspaceId);
+    if (businessHours.configured && !businessHours.isOpen) {
       if (agent.responseDelaySec > 0) {
         await new Promise((r) => setTimeout(r, agent.responseDelaySec * 1000));
       }
-      const offReply = agent.offHoursReply.trim();
-      await opts.sendReply(waPhone, offReply);
+      const nextOpening = businessHours.nextOpeningLabel ?? "في أقرب وقت";
+      const offReply = agent.offHoursReply?.trim()
+        ? agent.offHoursReply
+            .replace(/\{\{nextOpening\}\}/g, nextOpening)
+            .replace(/\{\{openingTime\}\}/g, nextOpening)
+        : `شكراً لتواصلك معنا. نعود للعمل ${nextOpening}، وسنرد عليك حينها.`;
+      const delivery = await sendAgentReply(opts, agent, waPhone, offReply);
       const replyMsg = await prisma.message.create({
         data: {
           conversationId: conversation.id,
           direction: "OUTBOUND",
           senderType: "AI",
           body: offReply,
+          ...(delivery.voiceSent
+            ? {
+                mediaId: delivery.mediaId,
+                mediaType: "audio",
+                mediaMime: "audio/ogg; codecs=opus",
+              }
+            : {}),
         },
       });
       await prisma.conversation.update({
@@ -454,7 +502,7 @@ async function runPipeline(
   }
 
   // إرسال الرد خارجياً (لواتساب فقط؛ الويدجت يستلمه من القيمة المعادة)
-  await opts.sendReply(waPhone, reply);
+  const delivery = await sendAgentReply(opts, agent, waPhone, reply);
 
   const replyMsg = await prisma.message.create({
     data: {
@@ -462,6 +510,13 @@ async function runPipeline(
       direction: "OUTBOUND",
       senderType: "AI",
       body: reply,
+      ...(delivery.voiceSent
+        ? {
+            mediaId: delivery.mediaId,
+            mediaType: "audio",
+            mediaMime: "audio/ogg; codecs=opus",
+          }
+        : {}),
     },
   });
   await prisma.conversation.update({
@@ -552,16 +607,32 @@ async function storeInboundWithoutAgent(input: {
         : {}),
     },
   });
+  const ratingNum = parseCsatRating(input.text);
+  const isCsatAnswer = conversation.csatPending && ratingNum !== null;
   // إعادة فتح المحادثة إن كانت مغلقة — رسالة العميل الجديدة تعيدها للوارد
   // + تحديث مزاج/نية العميل من نص رسالته (شارة الأولوية في الوارد)
   await prisma.conversation.update({
     where: { id: conversation.id },
     data: {
       lastMessageAt: new Date(),
-      closedAt: null,
+      closedAt: isCsatAnswer ? conversation.closedAt : null,
       sentiment: detectSentiment(input.text),
+      topic: isCsatAnswer
+        ? conversation.topic
+        : detectConversationTopic(input.text),
+      ...(isCsatAnswer
+        ? { csatRating: ratingNum, csatPending: false }
+        : {}),
     },
   });
+  if (isCriticalMessage(input.text)) {
+    await escalateCriticalConversation(
+      workspaceId,
+      conversation.id
+    ).catch((error) => {
+      console.error("[agent-engine] تعذّر تصعيد المحادثة الحرجة:", error);
+    });
+  }
   await incrementUsage(workspaceId);
 
   triggerNewMessage(workspaceId, conversation.id, msg);
@@ -669,6 +740,29 @@ export async function handleIncomingWhatsAppMessage(input: {
       platform: "WHATSAPP",
       media: input.media,
       sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),
+      sendVoiceReply: async (to, audio) => {
+        const mime = "audio/ogg; codecs=opus";
+        const mediaId = await uploadWhatsAppMedia(
+          { buffer: audio, mime, filename: "voice-reply.ogg" },
+          waCreds
+        );
+        if (waCreds?.provider === "meta" && !mediaId) {
+          return { sent: false, mediaId: null };
+        }
+        const sent = await sendWhatsAppMedia(
+          to,
+          {
+            mediaId: mediaId ?? "",
+            mediaType: "audio",
+            mime,
+            filename: "voice-reply.ogg",
+            buffer: audio,
+            voice: true,
+          },
+          waCreds
+        );
+        return { sent, mediaId: sent ? mediaId : null };
+      },
     });
   } catch (e) {
     // لا ندع الويب هوك يفشل أبداً — ميتا تعيد إرسال الحدث عند 5xx

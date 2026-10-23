@@ -33,6 +33,7 @@ export type AgentFormData = {
   systemPrompt: string;
   welcomeMessage: string;
   responseDelaySec: number;
+  voiceReplies: boolean;
   handoffKeywords: string[];
   isActive: boolean;
   knowledgeSources: KnowledgeItem[];
@@ -60,6 +61,7 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
   const [responseDelaySec, setResponseDelaySec] = useState(
     agent?.responseDelaySec ?? 3
   );
+  const [voiceReplies, setVoiceReplies] = useState(agent?.voiceReplies ?? false);
   const [handoffKeywords, setHandoffKeywords] = useState<string[]>(
     agent?.handoffKeywords ?? []
   );
@@ -229,6 +231,7 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
       welcomeMessage,
       offHoursReply,
       responseDelaySec,
+      voiceReplies,
       handoffKeywords,
       isActive,
       ...(isEdit ? {} : { knowledgeSources: pendingSources }),
@@ -295,14 +298,14 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
               id="off-hours-reply"
               value={offHoursReply}
               onChange={(e) => setOffHoursReply(e.target.value)}
-              placeholder="أهلاً بك، سنعاود التواصل معك في أوقات الدوام"
+              placeholder="أهلاً بك، نعود للعمل {{nextOpening}} وسنرد عليك حينها"
               rows={2}
               dir="rtl"
             />
             <p className="text-xs text-muted-foreground">
-              يُرسل هذا الرد تلقائياً بدل الرد الذكي خارج ساعات العمل — فقط إذا
-              كانت ساعات العمل مضبوطة في الإعدادات (الإعدادات ← ساعات العمل)،
-              ويتخطى الوكيل استدعاء الذكاء الاصطناعي عند إرساله
+              يُرسل هذا الرد تلقائياً بدل الرد الذكي خارج ساعات العمل. يمكنك
+              استخدام {"{{nextOpening}}"} لإظهار موعد العودة القادم. إذا تركته فارغاً
+              سيستخدم الوكيل رسالة تلقائية بموعد العودة، دون استدعاء الذكاء الاصطناعي.
             </p>
           </div>
           <TestChat systemPrompt={systemPrompt} knowledge={allKnowledge} />
@@ -644,6 +647,22 @@ export function AgentForm({ agent }: { agent?: AgentFormData }) {
               dir="ltr"
             />
           </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={voiceReplies}
+              onChange={(e) => setVoiceReplies(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span>
+              ردود صوتية للوكيل
+              <span className="mt-1 block text-xs text-muted-foreground">
+                يستخدم OpenAI TTS لصنع رسالة صوتية في واتساب. يتطلب مزود OpenAI
+                ومفتاحه؛ عند تعذّر التوليد أو الإرسال يعود الوكيل تلقائياً إلى النص.
+              </span>
+            </span>
+          </label>
 
           <label className="flex items-center gap-2 text-sm">
             <input

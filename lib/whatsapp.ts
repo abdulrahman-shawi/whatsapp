@@ -168,6 +168,7 @@ export async function sendWhatsAppMedia(
     mime: string;
     filename?: string;
     caption?: string;
+    voice?: boolean;
     // ملف UltraMsg الخام (base64) — لا يحتاج mediaId مرفوعاً مسبقاً
     buffer?: Buffer;
   },
@@ -188,6 +189,7 @@ async function sendMediaViaMeta(
     mime: string;
     filename?: string;
     caption?: string;
+    voice?: boolean;
   },
   creds: { token: string; phoneNumberId: string }
 ): Promise<boolean> {
@@ -205,7 +207,17 @@ async function sendMediaViaMeta(
               filename: media.filename ?? "ملف",
             },
           }
-        : {
+        : media.mediaType === "audio"
+          ? {
+              messaging_product: "whatsapp",
+              to,
+              type: "audio",
+              audio: {
+                id: media.mediaId,
+                ...(media.voice ? { voice: true } : {}),
+              },
+            }
+          : {
             messaging_product: "whatsapp",
             to,
             type: media.mediaType,

@@ -10,6 +10,7 @@ function serialize(a: {
   systemPrompt: string;
   welcomeMessage: string;
   responseDelaySec: number;
+  voiceReplies: boolean;
   handoffKeywords: string[];
   isActive: boolean;
   createdAt: Date;
@@ -75,6 +76,7 @@ export async function POST(req: Request) {
         Number.isInteger(body.responseDelaySec) && body.responseDelaySec >= 0
           ? body.responseDelaySec
           : 3,
+      voiceReplies: body.voiceReplies === true,
       handoffKeywords: Array.isArray(body.handoffKeywords)
         ? body.handoffKeywords.filter((k: unknown) => typeof k === "string")
         : [],

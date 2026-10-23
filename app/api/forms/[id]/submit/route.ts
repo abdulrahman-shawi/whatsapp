@@ -6,6 +6,7 @@ import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
 import { recalculateLeadScore } from "@/lib/scoring";
 import type { LeadFormField } from "@/lib/lead-forms";
+import { detectConversationTopic, detectSentiment } from "@/lib/sentiment";
 
 // استقبال إرسالة نموذج عام — بلا مصادقة: تصل كمحادثة واردة في صندوق الوارد
 export async function POST(
@@ -135,7 +136,12 @@ export async function POST(
   await prisma.conversation.update({
     where: { id: conversation.id },
     // طلب جديد يعيد فتح المحادثة المغلقة ويحدّث موضعها في القائمة
-    data: { lastMessageAt: new Date(), closedAt: null },
+    data: {
+      lastMessageAt: new Date(),
+      closedAt: null,
+      sentiment: detectSentiment(bodyText),
+      topic: detectConversationTopic(bodyText),
+    },
   });
 
   // رسالة الترحيب الفورية — أفضل جهد: عطل واتساب لا يفشل الإرسالة أبداً

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { CONTACT_STAGES, stageConfig } from "@/lib/contact-stages";
 import { SENTIMENT_LABELS, type Sentiment } from "@/lib/sentiment";
 import type { ContactStage } from "@prisma/client";
+import { ReportsExportButtons } from "@/components/reports-export-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,16 @@ export default async function ReportsPage() {
   monthStart.setHours(0, 0, 0, 0);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [conversations, contacts, recentMessages, monthMessages, bookings, ratings, timingMessages, inboundBodies, staffMessages, staffAssignments, members, csatAgg, senderTypeAgg, stageHistory, usageRecords] =
+  const [conversations, contacts, recentMessages, monthMessages, bookings, ratings, timingMessages, inboundBodies, staffMessages, staffAssignments, members, csatAgg, employeeCsatConversations, senderTypeAgg, stageHistory, usageRecords] =
     await Promise.all([
       prisma.conversation.findMany({
         where: { workspaceId: ctx.workspaceId },
-        select: { sentiment: true, contact: { select: { stage: true } } },
+        select: {
+          sentiment: true,
+          createdAt: true,
+          closedAt: true,
+          contact: { select: { stage: true } },
+        },
       }),
       prisma.contact.count({ where: { workspaceId: ctx.workspaceId } }),
       prisma.message.findMany({
@@ -40,12 +46,15 @@ export default async function ReportsPage() {
         where: { conversation: { workspaceId: ctx.workspaceId }, rating: { not: null } },
         _count: true,
       }),
-      // آخر ٥٠٠ رسالة مرتبة زمنياً لحساب متوسط زمن الرد
+      // رسائل آخر ٣٠ يوماً مرتبة داخل كل محادثة لحساب زمن الرد والتحويل الفعلي
       prisma.message.findMany({
-        where: { conversation: { workspaceId: ctx.workspaceId }, isNote: false },
-        orderBy: { createdAt: "asc" },
-        take: 500,
-        select: { direction: true, createdAt: true },
+        where: {
+          conversation: { workspaceId: ctx.workspaceId },
+          createdAt: { gte: thirtyDaysAgo },
+          isNote: false,
+        },
+        orderBy: [{ conversationId: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        select: { conversationId: true, direction: true, senderType: true, createdAt: true },
       }),
       // آخر ٢٠٠ رسالة واردة لتحليل أكثر الكلمات تكراراً
       prisma.message.findMany({
@@ -70,7 +79,10 @@ export default async function ReportsPage() {
       // المحادثات المسندة لكل موظف
       prisma.conversationAssignee.groupBy({
         by: ["userId"],
-        where: { conversation: { workspaceId: ctx.workspaceId } },
+        where: {
+          conversation: { workspaceId: ctx.workspaceId },
+          assignedAt: { gte: thirtyDaysAgo },
+        },
         _count: true,
       }),
       // أعضاء مساحة العمل لعرض الأسماء
@@ -83,6 +95,18 @@ export default async function ReportsPage() {
         where: { workspaceId: ctx.workspaceId, csatRating: { not: null } },
         _avg: { csatRating: true },
         _count: true,
+      }),
+      // تقييمات المحادثات خلال ٣٠ يوماً مع الموظفين المسندة إليهم
+      prisma.conversation.findMany({
+        where: {
+          workspaceId: ctx.workspaceId,
+          csatRating: { not: null },
+          closedAt: { gte: thirtyDaysAgo },
+        },
+        select: {
+          csatRating: true,
+          assignees: { select: { userId: true } },
+        },
       }),
       // الرسائل الصادرة حسب مرسلها (ذكاء اصطناعي مقابل بشري) آخر ٣٠ يوماً
       prisma.message.groupBy({
@@ -133,24 +157,44 @@ export default async function ReportsPage() {
   const goodCount = ratings.find((r) => r.rating === "GOOD")?._count ?? 0;
   const badCount = ratings.find((r) => r.rating === "NEEDS_IMPROVEMENT")?._count ?? 0;
 
-  // متوسط زمن الرد الأول: الفرق بين آخر رسالة واردة وأول رسالة صادرة تليها (تجاهل الفجوات الطويلة)
-  let lastInboundAt: Date | null = null;
+  // يُحسب الرد الأول والتحويل من الذكاء إلى البشر على مستوى المحادثة لا بين محادثات مختلفة.
   const responseDiffs: number[] = [];
   const responseDiffsByDay = new Map<string, number[]>();
-  for (const m of timingMessages) {
-    if (m.direction === "INBOUND") {
-      lastInboundAt = m.createdAt;
-    } else if (lastInboundAt) {
-      const diffSec = (m.createdAt.getTime() - lastInboundAt.getTime()) / 1000;
-      if (diffSec >= 0 && diffSec <= 30 * 60) {
-        responseDiffs.push(diffSec);
-        const dayKey = lastInboundAt.toDateString();
-        const list = responseDiffsByDay.get(dayKey) ?? [];
-        list.push(diffSec);
-        responseDiffsByDay.set(dayKey, list);
+  const interactionByConversation = new Map<string, typeof timingMessages>();
+  for (const message of timingMessages) {
+    const messages = interactionByConversation.get(message.conversationId) ?? [];
+    messages.push(message);
+    interactionByConversation.set(message.conversationId, messages);
+  }
+  let aiConversations = 0;
+  let aiToHumanConversations = 0;
+  for (const messages of interactionByConversation.values()) {
+    let firstInboundAt: Date | null = null;
+    let hasFirstResponse = false;
+    let hasAiResponse = false;
+    let hasHumanAfterAi = false;
+    for (const message of messages) {
+      if (message.direction === "INBOUND" && firstInboundAt === null) {
+        firstInboundAt = message.createdAt;
+      } else if (message.direction === "OUTBOUND") {
+        if (firstInboundAt && !hasFirstResponse && message.createdAt >= firstInboundAt) {
+          const diffSec = (message.createdAt.getTime() - firstInboundAt.getTime()) / 1000;
+          responseDiffs.push(diffSec);
+          const dayKey = firstInboundAt.toDateString();
+          const list = responseDiffsByDay.get(dayKey) ?? [];
+          list.push(diffSec);
+          responseDiffsByDay.set(dayKey, list);
+          hasFirstResponse = true;
+        }
+        if (message.senderType === "AI") {
+          hasAiResponse = true;
+        } else if (message.senderType === "HUMAN" && hasAiResponse) {
+          hasHumanAfterAi = true;
+        }
       }
-      lastInboundAt = null;
     }
+    if (hasAiResponse) aiConversations++;
+    if (hasHumanAfterAi) aiToHumanConversations++;
   }
   const avgResponseSec =
     responseDiffs.length > 0
@@ -162,6 +206,31 @@ export default async function ReportsPage() {
       : avgResponseSec < 60
         ? `${avgResponseSec} ثانية`
         : `${Math.floor(avgResponseSec / 60)} د ${avgResponseSec % 60} ث`;
+
+  const closedDurationsSec = conversations.flatMap((conversation) =>
+    conversation.closedAt &&
+    conversation.closedAt >= thirtyDaysAgo &&
+    conversation.closedAt >= conversation.createdAt
+      ? [(conversation.closedAt.getTime() - conversation.createdAt.getTime()) / 1000]
+      : []
+  );
+  const avgClosureSec =
+    closedDurationsSec.length > 0
+      ? Math.round(closedDurationsSec.reduce((sum, duration) => sum + duration, 0) / closedDurationsSec.length)
+      : null;
+  const formatDuration = (seconds: number | null) => {
+    if (seconds === null) return "—";
+    if (seconds < 60) return `${seconds} ثانية`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} دقيقة`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} س ${minutes % 60} د`;
+    const days = Math.floor(hours / 24);
+    return `${days} يوم ${hours % 24} س`;
+  };
+  const avgClosureLabel = formatDuration(avgClosureSec);
+  const aiToHumanRate =
+    aiConversations > 0 ? Math.round((aiToHumanConversations / aiConversations) * 100) : null;
 
   // زمن الرد اليومي (آخر ١٤ يوماً) — متوسط الفرق بالدقائق لكل يوم
   const responsePerDay: { day: string; avgMin: number | null }[] = [];
@@ -175,7 +244,7 @@ export default async function ReportsPage() {
   }
   const maxResponseMin = Math.max(...responsePerDay.map((d) => d.avgMin ?? 0), 1);
 
-  // نسبة الرد: ذكاء اصطناعي مقابل بشري (رسائل صادرة آخر ٣٠ يوماً)
+  // توزيع الرسائل الصادرة حسب المرسل (آخر ٣٠ يوماً)
   const aiCount = senderTypeAgg.find((s) => s.senderType === "AI")?._count ?? 0;
   const humanCount = senderTypeAgg.find((s) => s.senderType === "HUMAN")?._count ?? 0;
   const totalOutbound = aiCount + humanCount;
@@ -246,16 +315,64 @@ export default async function ReportsPage() {
   const maxWord = topWords[0]?.[1] ?? 1;
 
   // أداء الموظفين: رسائل صادرة + محادثات مسندة
+  const csatByEmployee = new Map<string, { sum: number; count: number }>();
+  for (const conversation of employeeCsatConversations) {
+    if (conversation.csatRating === null) continue;
+    for (const { userId } of conversation.assignees) {
+      const stats = csatByEmployee.get(userId) ?? { sum: 0, count: 0 };
+      stats.sum += conversation.csatRating;
+      stats.count++;
+      csatByEmployee.set(userId, stats);
+    }
+  }
   const staffRows = members.map((m) => {
     const sent = staffMessages.find((s) => s.senderId === m.user.id)?._count ?? 0;
     const assigned = staffAssignments.find((a) => a.userId === m.user.id)?._count ?? 0;
-    return { id: m.user.id, name: m.user.name || "بدون اسم", sent, assigned };
+    const csat = csatByEmployee.get(m.user.id) ?? { sum: 0, count: 0 };
+    return {
+      id: m.user.id,
+      name: m.user.name || "بدون اسم",
+      sent,
+      assigned,
+      csatAverage: csat.count > 0 ? csat.sum / csat.count : null,
+      csatCount: csat.count,
+    };
   });
   const maxStaffSent = Math.max(...staffRows.map((s) => s.sent), 1);
+  const exportRows: (string | number)[][] = [
+    ["المؤشر", "القيمة", "الفترة"],
+    ["متوسط زمن الرد الأول", avgResponseLabel, "آخر ٣٠ يوماً"],
+    ["متوسط زمن الإغلاق", avgClosureLabel, "المحادثات المغلقة آخر ٣٠ يوماً"],
+    [
+      "التحويل من الذكاء الاصطناعي إلى الموظف",
+      aiToHumanRate === null
+        ? "لا توجد بيانات"
+        : `${aiToHumanRate}% (${aiToHumanConversations} من ${aiConversations})`,
+      "آخر ٣٠ يوماً",
+    ],
+    ["إجمالي المحادثات", conversations.length, "كل الفترات"],
+    [],
+    ["أداء الموظفين", "المحادثات المسندة", "الرسائل البشرية الصادرة", "متوسط CSAT", "تقييمات CSAT"],
+    ...staffRows.map((staff) => [
+      staff.name,
+      staff.assigned,
+      staff.sent,
+      staff.csatAverage === null ? "—" : staff.csatAverage.toFixed(1),
+      staff.csatCount,
+    ]),
+    [],
+    ["نشاط الرسائل اليومي", "عدد الرسائل"],
+    ...perDay.map((day) => [day.day, day.count]),
+  ];
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-xl font-bold">التقارير</h1>
+    <div className="reports-print-area space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold">التقارير وتقييم الأداء</h1>
+        <div className="reports-no-print">
+          <ReportsExportButtons rows={exportRows} />
+        </div>
+      </div>
 
       {/* أرقام إجمالية */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -446,8 +563,46 @@ export default async function ReportsPage() {
           <CardContent className="space-y-1 text-sm">
             <p className="text-2xl font-bold text-primary">{avgResponseLabel}</p>
             <p className="text-xs text-muted-foreground">
-              من {responseDiffs.length} رداً مُقاساً خلال آخر ٥٠٠ رسالة (تُستبعد الفجوات فوق ٣٠ دقيقة).
+              من {responseDiffs.length} محادثة بدأ فيها العميل الحديث خلال آخر ٣٠ يوماً.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* متوسط زمن الإغلاق */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">متوسط زمن الإغلاق</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p className="text-2xl font-bold text-primary">{avgClosureLabel}</p>
+            <p className="text-xs text-muted-foreground">
+              من {closedDurationsSec.length} محادثة أُغلقت خلال آخر ٣٠ يوماً، من وقت الإنشاء حتى الإغلاق.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* التحويل من الذكاء الاصطناعي إلى الموظف */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">التحويل من الذكاء الاصطناعي إلى الموظف — آخر ٣٠ يوماً</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {aiToHumanRate === null ? (
+              <p className="text-xs text-muted-foreground">لا توجد محادثات بدأ الذكاء الاصطناعي الرد فيها بعد.</p>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-primary">{aiToHumanRate}٪</p>
+                <p className="text-xs text-muted-foreground">
+                  {aiToHumanConversations} من {aiConversations} محادثة أجاب فيها الذكاء الاصطناعي، ثم أرسل موظف رداً.
+                </p>
+                <div className="h-3 w-full overflow-hidden rounded bg-muted">
+                  <div
+                    className="h-full rounded bg-emerald-500/80"
+                    style={{ width: `${aiToHumanRate}%` }}
+                  />
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -483,6 +638,9 @@ export default async function ReportsPage() {
                     بشري: {humanCount} · {Math.round((humanCount / totalOutbound) * 100)}٪
                   </span>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  مقارنة حجم الرسائل الصادرة بين الذكاء الاصطناعي والموظفين؛ نسبة التحويل الفعلية موضحة بالمؤشر المجاور.
+                </p>
               </>
             )}
           </CardContent>
@@ -572,6 +730,11 @@ export default async function ReportsPage() {
                       </span>
                       <span className="w-24 shrink-0 text-end text-xs text-muted-foreground">
                         {s.assigned} محادثة مسندة
+                      </span>
+                      <span className="w-36 shrink-0 text-end text-xs text-muted-foreground">
+                        {s.csatAverage === null
+                          ? "لا تقييمات"
+                          : `رضا ${s.csatAverage.toFixed(1)}/٥ · ${s.csatCount} تقييم`}
                       </span>
                     </div>
                   ))}

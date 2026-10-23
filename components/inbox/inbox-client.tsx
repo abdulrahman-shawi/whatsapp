@@ -11,6 +11,7 @@ import type {
   AssignmentFilter,
   ContactInfo,
   ConversationListItem,
+  ConversationTopic,
   MemberInfo,
   MessageItem,
 } from "./types";
@@ -37,6 +38,7 @@ export function InboxClient({
     useState<ConversationListItem[]>(initialConversations);
   const [view, setView] = useState<ListView>("open");
   const [filter, setFilter] = useState<AssignmentFilter>("all");
+  const [topic, setTopic] = useState<ConversationTopic | "all">("all");
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -57,6 +59,8 @@ export function InboxClient({
   viewRef.current = view;
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const topicRef = useRef(topic);
+  topicRef.current = topic;
 
   // تحديث قائمة المحادثات من الخادم حسب نمط العرض والفلتر الحاليين
   const refreshList = useCallback(async () => {
@@ -65,7 +69,7 @@ export function InboxClient({
       const closed = viewRef.current === "closed";
       const followups = viewRef.current === "followups";
       const res = await fetch(
-        `/api/conversations?archived=${archived}&closed=${closed}&followups=${followups}&filter=${filterRef.current}`
+        `/api/conversations?archived=${archived}&closed=${closed}&followups=${followups}&filter=${filterRef.current}&topic=${topicRef.current}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -103,6 +107,10 @@ export function InboxClient({
 
   // القائمة المعروضة: نتائج البحث عند نشاطه، وإلا قائمة الوارد
   const visibleConversations = searchResults ?? conversations;
+  const topicFilteredConversations =
+    topic === "all"
+      ? visibleConversations
+      : visibleConversations.filter((conversation) => conversation.topic === topic);
 
   const selected =
     visibleConversations.find((c) => c.id === selectedId) ??
@@ -115,7 +123,7 @@ export function InboxClient({
     refreshList();
     const t = setInterval(refreshList, 15000);
     return () => clearInterval(t);
-  }, [view, filter, refreshList]);
+  }, [view, filter, topic, refreshList]);
 
   // اشتراك Pusher الفوري في قناة مساحة العمل — تُجلب المفاتيح من الخادم
   // (قاعدة البيانات أو .env)، وعند غيابها نعتمد على الاستطلاع أعلاه
@@ -380,7 +388,7 @@ export function InboxClient({
         )}
       >
         <ConversationList
-          conversations={visibleConversations}
+          conversations={topicFilteredConversations}
           selectedId={selectedId}
           onSelect={setSelectedId}
           view={view}
@@ -391,6 +399,12 @@ export function InboxClient({
           }}
           filter={filter}
           onFilterChange={setFilter}
+          topic={topic}
+          onTopicChange={(nextTopic) => {
+            setTopic(nextTopic);
+            setSelectedId(null);
+            setMessages([]);
+          }}
           query={query}
           onQueryChange={setQuery}
           searching={searching}

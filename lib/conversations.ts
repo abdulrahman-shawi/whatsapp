@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds, sendWhatsAppMessage, getLastWhatsAppError } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { recalculateLeadScore } from "@/lib/scoring";
+import type { ConversationTopic } from "@/lib/sentiment";
 
 // فلتر الإسناد: الكل / محادثاتي / غير المسندة
 export type AssignmentFilter = "all" | "mine" | "unassigned";
@@ -11,6 +12,7 @@ type ListOptions = {
   closed?: boolean; // عرض المغلقة بدل الوارد
   followups?: boolean; // عرض محادثات لها موعد متابعة (الأقرب موعداً أولاً)
   filter?: AssignmentFilter;
+  topic?: ConversationTopic;
   userId?: string; // مطلوب عند filter=mine
   restrictToUserId?: string; // قيود وصول الموظف: يرى محادثاته المسندة إليه فقط
 };
@@ -36,10 +38,19 @@ export async function getWorkspaceConversations(
   workspaceId: string,
   options: ListOptions = {}
 ) {
-  const { archived = false, closed = false, followups = false, filter = "all", userId, restrictToUserId } = options;
+  const {
+    archived = false,
+    closed = false,
+    followups = false,
+    filter = "all",
+    topic,
+    userId,
+    restrictToUserId,
+  } = options;
 
   const where = {
     workspaceId,
+    ...(topic ? { topic } : {}),
     ...(followups
       ? { isArchived: false, closedAt: null, followUpAt: { not: null } }
       : archived
@@ -61,8 +72,11 @@ export async function getWorkspaceConversations(
     where,
     // قائمة المتابعات تُرتَّب بموعد المتابعة؛ غير ذلك الأحدث رسالة أولاً
     orderBy: followups
-      ? [{ followUpAt: "asc" }]
-      : [{ lastMessageAt: { sort: "desc", nulls: "last" } }],
+      ? [{ isCritical: "desc" }, { followUpAt: "asc" }]
+      : [
+          { isCritical: "desc" },
+          { lastMessageAt: { sort: "desc", nulls: "last" } },
+        ],
     include: {
       contact: {
         select: {
@@ -93,6 +107,8 @@ export async function getWorkspaceConversations(
     id: c.id,
     workspaceId: c.workspaceId,
     status: c.status,
+    isCritical: c.isCritical,
+    criticalAt: c.criticalAt?.toISOString() ?? null,
     platform: c.platform,
     isArchived: c.isArchived,
     agentId: c.agentId,
@@ -104,6 +120,7 @@ export async function getWorkspaceConversations(
     notes: c.notes,
     csatRating: c.csatRating,
     sentiment: c.sentiment,
+    topic: c.topic,
     summary: c.summary,
     lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),
     contact: c.contact,

@@ -61,7 +61,8 @@ export async function generateReply(
   messages: ChatMessage[],
   systemPrompt: string,
   knowledge: string[],
-  config: AiConfig
+  config: AiConfig,
+  maxTokens = 300
 ): Promise<AiReply | null> {
   if (!config.apiKey || !config.baseUrl || !config.model) return null;
 
@@ -87,7 +88,7 @@ export async function generateReply(
         body: JSON.stringify({
           model: config.model,
           messages: [{ role: "system", content: system }, ...messages],
-          max_tokens: 300,
+          max_tokens: maxTokens,
         }),
       }
     );

@@ -105,3 +105,33 @@
 .rise-in {
   animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .reports-print-area,
+  .reports-print-area * {
+    visibility: visible !important;
+  }
+  .reports-no-print {
+    display: none !important;
+  }
+  .reports-print-area {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 12mm;
+  }
+  .reports-print-area .rounded-3xl {
+    break-inside: avoid;
+  }
+  .reports-print-area {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  @page {
+    size: landscape;
+    margin: 0;
+  }
+}

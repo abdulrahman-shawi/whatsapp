@@ -32,6 +32,7 @@ export async function POST(
       systemPrompt: version.systemPrompt,
       welcomeMessage: version.welcomeMessage,
       responseDelaySec: version.responseDelaySec,
+      voiceReplies: version.voiceReplies,
       handoffKeywords: version.handoffKeywords,
     },
   });
@@ -48,6 +49,7 @@ export async function POST(
       systemPrompt: updated.systemPrompt,
       welcomeMessage: updated.welcomeMessage,
       responseDelaySec: updated.responseDelaySec,
+      voiceReplies: updated.voiceReplies,
       handoffKeywords: updated.handoffKeywords,
       knowledge,
       createdById: ctx.userId,

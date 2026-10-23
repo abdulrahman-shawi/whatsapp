@@ -18,6 +18,7 @@ import { getIntegration } from "@/lib/settings";
 import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
 import { recalculateLeadScore } from "@/lib/scoring";
+import { getBusinessHoursInfo } from "@/lib/business-hours";
 
 // شرط التفرع في خطوة IF
 export type IfCondition =
@@ -677,29 +678,27 @@ async function sendWorkflowMedia(
   }
 }
 
-// هل الوقت الحالي ضمن ساعات العمل؟ تُضبط من صفحة التكاملات
-// BUSINESS_HOURS_START / BUSINESS_HOURS_END (ساعة 0-23) / BUSINESS_HOURS_DAYS ("0,1,2…" — فارغ = كل الأيام)
-// عند عدم الضبط: لا قيد (true)
-export async function isBusinessHours(workspaceId: string): Promise<boolean> {
-  const [start, end, days] = await Promise.all([
+export async function getWorkspaceBusinessHours(workspaceId: string) {
+  const [start, end, days, timezone] = await Promise.all([
     getIntegration(workspaceId, "BUSINESS_HOURS_START"),
     getIntegration(workspaceId, "BUSINESS_HOURS_END"),
     getIntegration(workspaceId, "BUSINESS_HOURS_DAYS"),
+    getIntegration(workspaceId, "BUSINESS_HOURS_TIMEZONE"),
   ]);
-  if (!start && !end) return true; // غير مضبوط — بلا قيد
-
-  const now = new Date();
-  if (days) {
-    const allowed = days
-      .split(",")
-      .map((d) => parseInt(d.trim(), 10))
-      .filter((n) => !isNaN(n));
-    if (allowed.length > 0 && !allowed.includes(now.getDay())) return false;
+  try {
+    return getBusinessHoursInfo({ start, end, days, timezone });
+  } catch (error) {
+    console.error(`[business-hours] إعداد ساعات العمل غير صالح للمساحة ${workspaceId}:`, error);
+    return {
+      configured: Boolean(start || end),
+      isOpen: true,
+      nextOpeningLabel: null,
+    };
   }
-  const s = parseInt(start ?? "9", 10);
-  const e = parseInt(end ?? "17", 10);
-  const h = now.getHours();
-  return h >= s && h < e;
+}
+
+export async function isBusinessHours(workspaceId: string): Promise<boolean> {
+  return (await getWorkspaceBusinessHours(workspaceId)).isOpen;
 }
 
 // "HH:mm" → دقائق من منتصف الليل

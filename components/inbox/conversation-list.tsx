@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { relativeTime, dateTime } from "@/lib/time";
 import { StageBadge } from "./stage-badge";
+import { CONVERSATION_TOPIC_LABELS } from "@/lib/sentiment";
 import type { ListView } from "./inbox-client";
 import type {
   AssignmentFilter,
   ConversationListItem,
   ConversationStatus,
+  ConversationTopic,
 } from "./types";
 
 // مسميات وألوان حالات المحادثة
@@ -38,6 +40,13 @@ const sentimentConfig: Record<string, { label: string; className: string }> = {
   PRICE: { label: "سؤال سعر", className: "border-sky-300 bg-sky-50 text-sky-700" },
 };
 
+const topicConfig: Record<ConversationTopic, string> = {
+  INQUIRY: "border-slate-300 bg-slate-50 text-slate-700",
+  COMPLAINT: "border-red-300 bg-red-50 text-red-700",
+  BOOKING: "border-violet-300 bg-violet-50 text-violet-700",
+  QUOTE: "border-sky-300 bg-sky-50 text-sky-700",
+};
+
 type Props = {
   conversations: ConversationListItem[];
   selectedId: string | null;
@@ -46,6 +55,8 @@ type Props = {
   onViewChange: (view: ListView) => void;
   filter: AssignmentFilter;
   onFilterChange: (filter: AssignmentFilter) => void;
+  topic: ConversationTopic | "all";
+  onTopicChange: (topic: ConversationTopic | "all") => void;
   // البحث الشامل: نص البحث ونتائجه تديرها النافذة الأم (inbox-client)
   query: string;
   onQueryChange: (q: string) => void;
@@ -61,6 +72,8 @@ export function ConversationList({
   onViewChange,
   filter,
   onFilterChange,
+  topic,
+  onTopicChange,
   query,
   onQueryChange,
   searching,
@@ -149,7 +162,7 @@ export function ConversationList({
 
       {/* فلتر الإسناد — في الوارد المفتوح فقط */}
       {view === "open" && (
-        <div className="border-b p-2">
+        <div className="space-y-2 border-b p-2">
           <select
             value={filter}
             onChange={(e) => onFilterChange(e.target.value as AssignmentFilter)}
@@ -158,6 +171,21 @@ export function ConversationList({
             <option value="all">الكل</option>
             <option value="mine">محادثاتي</option>
             <option value="unassigned">غير مسندة</option>
+          </select>
+          <select
+            aria-label="تصفية حسب موضوع المحادثة"
+            value={topic}
+            onChange={(e) =>
+              onTopicChange(e.target.value as ConversationTopic | "all")
+            }
+            className="w-full rounded-full border border-border bg-background px-3.5 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="all">كل المواضيع</option>
+            {Object.entries(CONVERSATION_TOPIC_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
         </div>
       )}
@@ -232,6 +260,25 @@ export function ConversationList({
                       title="نية الشراء والمزاج — يُحدَّث تلقائياً من آخر رسالة"
                     >
                       {sentimentConfig[c.sentiment].label}
+                    </Badge>
+                  )}
+                  {c.topic && (
+                    <Badge
+                      variant="outline"
+                      className={`px-1.5 py-0 ${topicConfig[c.topic]}`}
+                      title="الموضوع المصنّف من أحدث رسالة واردة"
+                    >
+                      {CONVERSATION_TOPIC_LABELS[c.topic]}
+                    </Badge>
+                  )}
+                  {c.isCritical && (
+                    <Badge
+                      variant="outline"
+                      className="border-red-400 px-1.5 py-0 text-red-700"
+                      title="محادثة حرجة — مُثبتة ومسندة للمالك"
+                    >
+                      <span aria-hidden="true">!</span>
+                      حرجة
                     </Badge>
                   )}
                   {c.platform === "WIDGET" && (

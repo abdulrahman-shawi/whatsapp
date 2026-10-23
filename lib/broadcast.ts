@@ -42,6 +42,7 @@ export function buildAudienceWhere(
   audience: BroadcastAudience
 ): Prisma.ContactWhereInput {
   const where: Prisma.ContactWhereInput = { workspaceId };
+  where.blocked = false;
   if (audience.tags.length > 0) where.tags = { hasSome: audience.tags };
   if (audience.stage) where.stage = audience.stage;
   if (audience.inactiveDays != null) {
@@ -101,6 +102,32 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
       select: { name: true, language: true },
     });
   }
+  const failBeforeSending = async (reason: string) => {
+    console.error(`[broadcast] تعذر إرسال الحملة ${campaign.id}: ${reason}`);
+    await prisma.broadcastCampaign.update({
+      where: { id: campaign.id },
+      data: {
+        status: "FAILED",
+        sentCount: 0,
+        failedCount: campaign.totalCount,
+        sentCountB: 0,
+        failedCountB: 0,
+        sentAt: new Date(),
+      },
+    });
+    fireOutboundEvent(campaign.workspaceId, "broadcast.failed", {
+      id: campaign.id,
+      tag: campaign.tag,
+      totalCount: campaign.totalCount,
+      sentCount: 0,
+      failedCount: campaign.totalCount,
+      status: "FAILED",
+    });
+  };
+  if (campaign.templateId && !template) {
+    await failBeforeSending("قالب الحملة غير موجود في مساحة العمل");
+    return;
+  }
 
   // جمهور الحملة: الاستهداف المركّب (تسميات + مرحلة + خمول)
   // توافق خلفي: حملات قديمة بلا audience تُدار بتسميتها المخزّنة
@@ -136,6 +163,10 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
   };
 
   const creds = await resolveWhatsAppCreds(campaign.workspaceId);
+  if (template && creds?.provider !== "meta") {
+    await failBeforeSending("قوالب Meta تتطلب إعداد مزود Meta لهذه المساحة");
+    return;
+  }
 
   // حد الباقة: الرصيد المتبقي يجب أن يكفي لحجم الجمهور قبل أي إرسال
   const usage = await getUsageStatus(campaign.workspaceId);

@@ -67,6 +67,12 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     data.responseDelaySec = body.responseDelaySec;
   }
+  if (body.voiceReplies !== undefined) {
+    if (typeof body.voiceReplies !== "boolean") {
+      return NextResponse.json({ error: "إعداد الرد الصوتي غير صالح" }, { status: 400 });
+    }
+    data.voiceReplies = body.voiceReplies;
+  }
   if (body.handoffKeywords !== undefined) {
     if (
       !Array.isArray(body.handoffKeywords) ||
@@ -107,6 +113,7 @@ export async function PATCH(req: Request, { params }: Params) {
       systemPrompt: agent.systemPrompt,
       welcomeMessage: agent.welcomeMessage,
       responseDelaySec: agent.responseDelaySec,
+      voiceReplies: agent.voiceReplies,
       handoffKeywords: agent.handoffKeywords,
       knowledge,
       createdById: ctx.userId,

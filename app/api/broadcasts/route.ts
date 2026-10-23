@@ -10,6 +10,7 @@ import {
   type BroadcastAudience,
 } from "@/lib/broadcast";
 import { logAudit } from "@/lib/audit";
+import { validateTemplateParams } from "@/lib/broadcast-templates";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
@@ -93,19 +94,13 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const text = body?.body?.trim();
-  const templateId = body?.templateId ?? null;
+  const text = typeof body?.body === "string" ? body.body.trim() : "";
+  const templateId =
+    typeof body?.templateId === "string" ? body.templateId.trim() || null : null;
   const params: string[] = Array.isArray(body?.params)
     ? body.params.map((p: unknown) => String(p ?? ""))
     : [];
   const scheduledAtRaw = body?.scheduledAt?.trim?.() ?? "";
-  if (!text) {
-    return NextResponse.json(
-      { error: "نص الرسالة مطلوب" },
-      { status: 400 }
-    );
-  }
-
   // الاستهداف: audience المركّب، أو tag الواحد القديم
   let audience: BroadcastAudience;
   if (body?.audience && typeof body.audience === "object") {
@@ -172,6 +167,33 @@ export async function POST(req: Request) {
     if (!template) {
       return NextResponse.json({ error: "القالب غير موجود" }, { status: 404 });
     }
+    if (!template.body.trim()) {
+      return NextResponse.json(
+        { error: "القالب المختار لا يحتوي على نص معاينة" },
+        { status: 400 }
+      );
+    }
+    if (bodyB || linkUrl || linkUrlB) {
+      return NextResponse.json(
+        { error: "اختبار A/B وروابط التتبع غير متاحة مع قوالب Meta؛ أدرج الرابط كمتغير في القالب المعتمد" },
+        { status: 400 }
+      );
+    }
+    const paramsError = validateTemplateParams(template.body, params);
+    if (paramsError) {
+      return NextResponse.json({ error: paramsError }, { status: 400 });
+    }
+  } else if (!text) {
+    return NextResponse.json(
+      { error: "نص الرسالة مطلوب عند عدم اختيار قالب Meta" },
+      { status: 400 }
+    );
+  }
+  if (template && creds.provider !== "meta") {
+    return NextResponse.json(
+      { error: "قوالب Meta تتطلب إعداد مزود Meta لهذه المساحة، ولا تعمل مع UltraMsg" },
+      { status: 400 }
+    );
   }
 
   // جمهور الحملة بالشرط المركّب الموحّد
@@ -215,7 +237,7 @@ export async function POST(req: Request) {
       tag: audience.tags[0] ?? "",
       audience: JSON.stringify(audience),
       linkUrl,
-      body: text,
+      body: template?.body ?? text,
       bodyB,
       linkUrlB,
       templateId: template?.id ?? null,

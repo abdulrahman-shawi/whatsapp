@@ -32,6 +32,7 @@ export default async function EditAgentPage({
           welcomeMessage: agent.welcomeMessage,
           offHoursReply: agent.offHoursReply,
           responseDelaySec: agent.responseDelaySec,
+          voiceReplies: agent.voiceReplies,
           handoffKeywords: agent.handoffKeywords,
           isActive: agent.isActive,
           knowledgeSources: agent.knowledgeSources.map((s) => ({

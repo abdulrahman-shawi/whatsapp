@@ -9,6 +9,7 @@ import {
   CheckCheck,
   Clock,
   FileText,
+  Languages,
   ListCollapse,
   Loader2,
   Paperclip,
@@ -79,6 +80,9 @@ export function ChatWindow({
   onFollowUpChanged,
 }: Props) {
   const [text, setText] = useState("");
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translationLoading, setTranslationLoading] = useState<string | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -121,6 +125,9 @@ export function ChatWindow({
   // تنظيف الحقول عند تبديل المحادثة + تحميل الردود الجاهزة والمجدولة لها
   useEffect(() => {
     setText("");
+    setTranslations({});
+    setTranslationLoading(null);
+    setTranslationError(null);
     setPendingFile(null);
     setSuggestion(null);
     setIsNoteMode(false);
@@ -307,6 +314,7 @@ export function ChatWindow({
       } finally {
         setSendingMedia(false);
       }
+
       setText("");
       setPendingFile(null);
       setSuggestion(null);
@@ -324,6 +332,33 @@ export function ChatWindow({
     onSend(cannedMatch ? cannedMatch.body : typed, isNoteMode);
     setText("");
     setSuggestion(null);
+  }
+
+  async function translateText(
+    source: string,
+    direction: "toArabic" | "toCustomer",
+    key: string
+  ) {
+    setTranslationLoading(key);
+    setTranslationError(null);
+    try {
+      const res = await fetch(`/api/conversations/${conversation.id}/translate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: source, direction }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || typeof data?.translation !== "string") {
+        setTranslationError(data?.error ?? "تعذرت الترجمة");
+        return;
+      }
+      if (key === "draft") setText(data.translation);
+      else setTranslations((current) => ({ ...current, [key]: data.translation }));
+    } catch {
+      setTranslationError("تعذر الاتصال بخدمة الترجمة");
+    } finally {
+      setTranslationLoading(null);
+    }
   }
 
   // إدراج رد جاهز في خانة الإرسال
@@ -781,6 +816,32 @@ export function ChatWindow({
                 {(!m.mediaId || !m.body.startsWith("[")) && (
                   <p className="whitespace-pre-wrap break-words">{m.body}</p>
                 )}
+                {m.direction === "INBOUND" &&
+                  m.body.trim() &&
+                  (!m.mediaId || !m.body.startsWith("[")) && (
+                  <div className="mt-1">
+                    {translations[m.id] ? (
+                      <p className="whitespace-pre-wrap break-words border-t border-border/50 pt-1 text-muted-foreground">
+                        {translations[m.id]}
+                      </p>
+                    ) : (
+                      <button
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        disabled={translationLoading === m.id}
+                        onClick={() =>
+                          translateText(m.body, "toArabic", m.id)
+                        }
+                      >
+                        {translationLoading === m.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Languages className="h-3 w-3" />
+                        )}
+                        ترجم للعربية
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
                   {m.direction === "OUTBOUND" && m.senderType === "AI" && (
                     <Badge variant="outline" className="px-1 py-0 text-[9px]">
@@ -827,6 +888,11 @@ export function ChatWindow({
 
       {/* شريط الاقتراح الذكي */}
       <div className="border-t px-3 pt-2">
+        {translationError && (
+          <p className="mb-2 text-xs text-destructive" role="alert">
+            {translationError}
+          </p>
+        )}
         {suggestion ? (
           <div className="mb-2 flex items-start gap-2 rounded-md border bg-accent p-2">
             <button
@@ -862,6 +928,22 @@ export function ChatWindow({
               )}
               اقتراح رد
             </Button>
+            {!isNoteMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => translateText(text, "toCustomer", "draft")}
+                disabled={!text.trim() || translationLoading === "draft"}
+                title="ترجمة الرد إلى لغة آخر رسالة للعميل، ثم مراجعته قبل الإرسال"
+              >
+                {translationLoading === "draft" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Languages className="h-4 w-4" />
+                )}
+                ترجم الرد
+              </Button>
+            )}
             {/* فتح منتقي قوالب الرسائل */}
             <Button
               variant={templatePickerOpen ? "secondary" : "ghost"}

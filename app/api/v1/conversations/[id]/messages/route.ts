@@ -37,7 +37,7 @@ export async function GET(
   );
 
   const messages = await prisma.message.findMany({
-    where: { conversationId: conversation.id },
+    where: { conversationId: conversation.id, isNote: false },
     orderBy: { createdAt: "asc" },
     take: limit,
     select: {
@@ -45,7 +45,6 @@ export async function GET(
       direction: true,
       senderType: true,
       body: true,
-      isNote: true,
       mediaType: true,
       rating: true,
       createdAt: true,

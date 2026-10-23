@@ -34,7 +34,10 @@ export async function GET(req: Request) {
         { messages: { some: { body: { contains: q, mode: "insensitive" } } } },
       ],
     },
-    orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }],
+    orderBy: [
+      { isCritical: "desc" },
+      { lastMessageAt: { sort: "desc", nulls: "last" } },
+    ],
     take: 30,
     include: {
       contact: {
@@ -55,6 +58,8 @@ export async function GET(req: Request) {
     conversations: conversations.map((c) => ({
       id: c.id,
       status: c.status,
+      isCritical: c.isCritical,
+      criticalAt: c.criticalAt?.toISOString() ?? null,
       platform: c.platform,
       isArchived: c.isArchived,
       closedAt: c.closedAt ? c.closedAt.toISOString() : null,
@@ -62,6 +67,7 @@ export async function GET(req: Request) {
       tags: c.tags,
       notes: c.notes,
       sentiment: c.sentiment,
+      topic: c.topic,
       summary: c.summary,
       lastMessageAt: (c.lastMessageAt ?? c.createdAt).toISOString(),
       assignees: c.assignees.map((a) => a.user),

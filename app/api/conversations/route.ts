@@ -5,6 +5,7 @@ import {
   getStaffRestrictionFilter,
   type AssignmentFilter,
 } from "@/lib/conversations";
+import { isConversationTopic } from "@/lib/sentiment";
 
 const FILTERS: AssignmentFilter[] = ["all", "mine", "unassigned"];
 
@@ -22,6 +23,8 @@ export async function GET(req: Request) {
   const filter = FILTERS.includes(filterParam as AssignmentFilter)
     ? (filterParam as AssignmentFilter)
     : "all";
+  const topicParam = params.get("topic");
+  const topic = topicParam && isConversationTopic(topicParam) ? topicParam : undefined;
 
   const restrictToUserId = await getStaffRestrictionFilter(
     ctx.workspaceId,
@@ -34,6 +37,7 @@ export async function GET(req: Request) {
     closed,
     followups,
     filter,
+    topic,
     userId: ctx.userId,
     restrictToUserId,
   });

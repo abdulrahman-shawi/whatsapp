@@ -39,6 +39,13 @@ enum ConversationStatus {
   HANDED_OFF
 }
 
+enum ConversationTopic {
+  INQUIRY
+  COMPLAINT
+  BOOKING
+  QUOTE
+}
+
 // اتجاه الرسالة
 enum MessageDirection {
   INBOUND
@@ -95,13 +102,14 @@ model User {
 
 // مساحة العمل: الكيان التجاري الذي يملك الوكلاء والمحادثات
 model Workspace {
-  id                String              @id @default(cuid())
+  id                String                 @id @default(cuid())
   name              String
-  createdAt         DateTime            @default(now())
+  createdAt         DateTime               @default(now())
   members           WorkspaceMember[]
   agents            Agent[]
   contacts          Contact[]
   conversations     Conversation[]
+  dailyReports      DailyWorkspaceReport[]
   usage             UsageRecord[]
   settings          Setting[]
   templates         Template[]
@@ -113,9 +121,9 @@ model Workspace {
   cannedResponses   CannedResponse[]
   scheduledMessages ScheduledMessage[]
   leadForms         LeadForm[]
-  restrictStaff     Boolean             @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
+  restrictStaff     Boolean                @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
   planId            String?
-  plan              Plan?               @relation(fields: [planId], references: [id], onDelete: SetNull)
+  plan              Plan?                  @relation(fields: [planId], references: [id], onDelete: SetNull)
   invoices          Invoice[]
 }
 
@@ -186,6 +194,21 @@ model Notification {
   createdAt   DateTime  @default(now())
 
   @@index([workspaceId, userId, createdAt])
+}
+
+// تقرير يومي واحد فقط لكل مساحة عمل؛ يمنع إرسال تقرير اليوم مرتين من الكرون
+model DailyWorkspaceReport {
+  id          String    @id @default(cuid())
+  workspaceId String
+  reportDate  String    @db.VarChar(10) // اليوم السابق بصيغة YYYY-MM-DD
+  status      String    @default("PROCESSING") // PROCESSING | READY | NOTIFYING | NOTIFIED | FAILED
+  body        String?   @db.Text
+  createdAt   DateTime  @default(now())
+  notifiedAt  DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, reportDate])
+  @@index([status, reportDate])
 }
 
 // سجل التدقيق: من فعل ماذا ومتى — يُعلَّق اسم المستخدم لأنه قد يُحذف
@@ -298,6 +321,7 @@ model Agent {
   welcomeMessage   String
   offHoursReply    String?           @db.Text // رد تلقائي خارج أوقات الدوام — null يعني استمرار الرد الآلي المعتاد دائماً
   responseDelaySec Int               @default(3) // تأخير الرد بالثواني ليبدو طبيعياً
+  voiceReplies     Boolean           @default(false)
   handoffKeywords  String[] // كلمات تفعيل التحويل لموظف بشري
   isActive         Boolean           @default(true)
   createdAt        DateTime          @default(now())
@@ -316,6 +340,7 @@ model AgentVersion {
   systemPrompt     String
   welcomeMessage   String
   responseDelaySec Int
+  voiceReplies     Boolean  @default(false)
   handoffKeywords  String[]
   knowledge        Json     @default("[]") // لقطة لمصادر المعرفة [{title, type, content}]
   createdById      String?
@@ -388,6 +413,8 @@ model Conversation {
   agentId           String?
   platform          Platform               @default(WHATSAPP)
   status            ConversationStatus     @default(AI)
+  isCritical        Boolean                @default(false)
+  criticalAt        DateTime?
   isArchived        Boolean                @default(false)
   closedAt          DateTime? // وجود قيمة تعني محادثة مغلقة (تختفي من الوارد)
   lastMessageAt     DateTime?
@@ -403,12 +430,15 @@ model Conversation {
   notes             String?                @db.Text // ملاحظات داخلية على مستوى المحادثة
   // مزاج/نية العميل — يُحدَّث تلقائياً عند كل رسالة واردة (انظر lib/sentiment.ts)
   sentiment         String? // INTERESTED | ANGRY | PRICE | NEUTRAL
+  topic             ConversationTopic? // يصنّف تلقائياً من أحدث رسالة واردة
   summary           String?                @db.Text // ملخص المحادثة المولّد بالذكاء الاصطناعي
   summarizedAt      DateTime?
   // تقييم الرضا (CSAT): سؤال 1-5 يُرسل بعد إغلاق المحادثة ويُسجَّل رد العميل
   csatPending       Boolean                @default(false) // بانتظار رد العميل بتقييم
   csatRating        Int? // التقييم المسجَّل 1..5
   csatAskedAt       DateTime? // وقت إرسال سؤال التقييم
+
+  @@index([workspaceId, isCritical, lastMessageAt])
 }
 
 // إسناد محادثة لموظف — نفس المحادثة قد تُسند لأكثر من شخص

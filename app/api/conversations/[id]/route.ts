@@ -25,6 +25,8 @@ export async function PATCH(
     status?: (typeof STATUSES)[number];
     isArchived?: boolean;
     closedAt?: Date | null;
+    isCritical?: boolean;
+    criticalAt?: Date | null;
     csatPending?: boolean;
     csatAskedAt?: Date;
     tags?: string[];
@@ -70,6 +72,10 @@ export async function PATCH(
       return NextResponse.json({ error: "قيمة الإغلاق غير صالحة" }, { status: 400 });
     }
     data.closedAt = body.closed ? new Date() : null;
+    if (body.closed) {
+      data.isCritical = false;
+      data.criticalAt = null;
+    }
     // سؤال تقييم الرضا: يُجدوَل بعد الإغلاق ويُلغى انتظار التقييم عند إعادة الفتح
     data.csatPending = body.closed;
     if (body.closed) data.csatAskedAt = new Date();

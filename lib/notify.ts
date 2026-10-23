@@ -18,7 +18,9 @@ export async function notifyUser(opts: {
     title: opts.title,
     body: opts.body,
     url: opts.link,
-  }).catch(() => {});
+  }).catch((error) => {
+    console.error("[notify] تعذّر إرسال Push للمستخدم:", error);
+  });
 }
 
 // إشعار لكل أعضاء مساحة العمل: داخلي + Push، مع إمكان استبعاد منفّذ الفعل

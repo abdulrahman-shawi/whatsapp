@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
 
 type Params = { params: { id: string } };
 
@@ -37,6 +38,9 @@ export async function GET(_req: Request, { params }: Params) {
 export async function POST(req: Request, { params }: Params) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json({ error: upgradeRequiredMessage() }, { status: 402 });
+  }
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: params.id, workspaceId: ctx.workspaceId },

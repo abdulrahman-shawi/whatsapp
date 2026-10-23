@@ -56,13 +56,17 @@ function estimateTokens(text: string): number {
   return Math.max(Math.ceil(text.length / 2.5), 1);
 }
 
+// تفاصيل فشل الطلب كما يردها المزوّد — تُملأ عند الحاجة للتشخيص
+export type AiErrorInfo = { status?: number; body?: string };
+
 // المفتاح والرابط والنموذج تُمرَّر من المتصل (من إعدادات مساحة العمل أو .env)
 export async function generateReply(
   messages: ChatMessage[],
   systemPrompt: string,
   knowledge: string[],
   config: AiConfig,
-  maxTokens = 300
+  maxTokens = 300,
+  errorInfo?: AiErrorInfo
 ): Promise<AiReply | null> {
   if (!config.apiKey || !config.baseUrl || !config.model) return null;
 
@@ -94,6 +98,10 @@ export async function generateReply(
     );
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
+      if (errorInfo) {
+        errorInfo.status = res.status;
+        errorInfo.body = errText.slice(0, 300);
+      }
       console.error(
         `[ai] فشل الطلب إلى ${config.baseUrl} (${res.status}): ${errText.slice(0, 500)}`
       );
@@ -122,6 +130,7 @@ export async function generateReply(
       },
     };
   } catch (e) {
+    if (errorInfo) errorInfo.body = e instanceof Error ? e.message : String(e);
     console.error("[ai] تعذّر الاتصال بالمزوّد:", e);
     return null;
   }

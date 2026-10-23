@@ -11,6 +11,7 @@ import {
 } from "@/lib/broadcast";
 import { logAudit } from "@/lib/audit";
 import { validateTemplateParams } from "@/lib/broadcast-templates";
+import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
@@ -91,6 +92,9 @@ export async function POST(req: Request) {
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
   if (ctx.role !== "OWNER") {
     return NextResponse.json({ error: "الحملات للمالك فقط" }, { status: 403 });
+  }
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json({ error: upgradeRequiredMessage() }, { status: 402 });
   }
 
   const body = await req.json().catch(() => null);

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getStaffRestrictionFilter } from "@/lib/conversations";
-import { generateReply, resolveAiConfig } from "@/lib/openai";
+import { resolveAiConfig } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 
 const translationAttempts = new Map<string, { startedAt: number; count: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -70,6 +72,12 @@ export async function POST(
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
   }
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json(
+      { error: "انتهت التجربة المجانية؛ الترقية مطلوبة لاستخدام الذكاء الاصطناعي." },
+      { status: 402 }
+    );
+  }
   if (body.direction === "toCustomer" && !conversation.messages[0]) {
     return NextResponse.json(
       { error: "لا توجد رسالة من العميل لتحديد لغة الترجمة" },
@@ -81,18 +89,25 @@ export async function POST(
     body.direction === "toArabic"
       ? "Translate the user's message into natural Arabic. Return only the translation, without explanation."
       : `Translate the staff reply into the same language as the customer's latest message below. Preserve meaning and tone. Return only the translation, without explanation.\n\nCustomer's latest message:\n${conversation.messages[0]?.body.slice(0, 1000) ?? ""}`;
-  const result = await generateReply(
+  const result = await generateWorkspaceReply(
+    ctx.workspaceId,
     [{ role: "user", content: body.text.trim() }],
     instruction,
     [],
     await resolveAiConfig(ctx.workspaceId),
     800
   );
-  if (!result?.content.trim()) {
+  if (result.quotaExceeded) {
+    return NextResponse.json(
+      { error: "تم بلوغ حد توكنات الذكاء الاصطناعي. رقِّ باقتك للمتابعة." },
+      { status: 402 }
+    );
+  }
+  if (!result.reply?.content.trim()) {
     return NextResponse.json(
       { error: "تعذرت الترجمة. تحقق من إعدادات مزود الذكاء الاصطناعي." },
       { status: 502 }
     );
   }
-  return NextResponse.json({ translation: result.content.trim() });
+  return NextResponse.json({ translation: result.reply.content.trim() });
 }

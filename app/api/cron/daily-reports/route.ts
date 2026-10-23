@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { resolveAiConfig, generateReply } from "@/lib/openai";
+import { resolveAiConfig } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
 import { sendPushToUser } from "@/lib/push";
 import { getPreviousUtcDayRange } from "@/lib/daily-report-date";
 
@@ -140,7 +141,8 @@ async function createDailyReport(
     .join("\n\n");
 
   const config = await resolveAiConfig(workspaceId);
-  const report = await generateReply(
+  const result = await generateWorkspaceReply(
+    workspaceId,
     [
       {
         role: "user",
@@ -158,6 +160,9 @@ async function createDailyReport(
     config,
     1200
   );
+  if (result.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");
+  if (result.quotaExceeded) throw new Error("تم بلوغ حد توكنات الذكاء الاصطناعي");
+  const report = result.reply;
   if (!report) {
     throw new Error("تعذّر توليد التقرير؛ تحقق من إعدادات مزوّد الذكاء الاصطناعي");
   }

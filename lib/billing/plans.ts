@@ -53,6 +53,34 @@ export type WorkspacePlan = {
   maxAgents: number;
 };
 
+export async function getWorkspaceTrialStatus(workspaceId: string): Promise<{
+  startsAt: Date | null;
+  endsAt: Date | null;
+  active: boolean;
+  expired: boolean;
+}> {
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { trialStartedAt: true, trialEndsAt: true, planId: true },
+  });
+  const active =
+    !workspace?.planId &&
+    workspace?.trialEndsAt !== null &&
+    workspace?.trialEndsAt !== undefined &&
+    workspace.trialEndsAt > new Date();
+  const expired =
+    !workspace?.planId &&
+    workspace?.trialEndsAt !== null &&
+    workspace?.trialEndsAt !== undefined &&
+    workspace.trialEndsAt <= new Date();
+  return {
+    startsAt: workspace?.trialStartedAt ?? null,
+    endsAt: workspace?.trialEndsAt ?? null,
+    active,
+    expired,
+  };
+}
+
 // التأكد من وجود الباقات في قاعدة البيانات — idempotent
 export async function ensurePlansSeeded(): Promise<void> {
   for (const def of PLAN_DEFINITIONS) {
@@ -83,6 +111,14 @@ export async function getWorkspacePlan(
     where: { id: workspaceId },
     include: { plan: true },
   });
+  if (
+    !workspace?.plan &&
+    workspace?.trialEndsAt &&
+    workspace.trialEndsAt > new Date()
+  ) {
+    const trialPlan = await prisma.plan.findUnique({ where: { code: "PRO" } });
+    if (trialPlan) return trialPlan as WorkspacePlan;
+  }
   if (workspace?.plan) {
     return workspace.plan as WorkspacePlan;
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { trialEndDate } from "@/lib/billing/trial";
 
 // تسجيل مستخدم جديد —
 // مع inviteToken صالح: ينضم لمساحة العامل الداعية بدورها (رابط أحادي الاستخدام)
@@ -73,6 +74,8 @@ export async function POST(req: Request) {
                         typeof workspaceName === "string" && workspaceName.trim()
                           ? workspaceName.trim()
                           : `مساحة عمل ${name.trim()}`,
+                      trialStartedAt: new Date(),
+                      trialEndsAt: trialEndDate(new Date()),
                     },
                   },
                 },

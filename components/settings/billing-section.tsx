@@ -5,6 +5,7 @@ import {
   ensurePlansSeeded,
   getUsageStatus,
   getWorkspacePlan,
+  getWorkspaceTrialStatus,
 } from "@/lib/billing/plans";
 import { stripeConfiguredAsync } from "@/lib/stripe";
 import { getPlatformConfig } from "@/lib/platform-config";
@@ -31,7 +32,7 @@ export async function BillingSection({
   canceled?: boolean;
 }) {
   await ensurePlansSeeded();
-  const [currentPlan, usage, plans, user] = await Promise.all([
+  const [currentPlan, usage, plans, user, trial] = await Promise.all([
     getWorkspacePlan(workspaceId),
     getUsageStatus(workspaceId),
     prisma.plan.findMany({ orderBy: { sortOrder: "asc" } }),
@@ -39,12 +40,29 @@ export async function BillingSection({
       where: { id: userId },
       select: { email: true },
     }),
+    getWorkspaceTrialStatus(workspaceId),
   ]);
 
   const isAdmin = !!user && adminEmails().includes(user.email.toLowerCase());
 
   return (
     <div className="max-w-3xl space-y-6">
+      {trial.active && trial.endsAt && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          أنت في التجربة المجانية لباقة {currentPlan.name}. تنتهي في{" "}
+          {new Intl.DateTimeFormat("ar", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(trial.endsAt)}{" "}
+         ؛ بعد ذلك تصبح مساحة العمل للقراءة فقط حتى تفعيل اشتراك.
+        </div>
+      )}
+      {trial.expired && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          انتهت التجربة المجانية. مساحة العمل للقراءة فقط؛ اختر باقة مدفوعة من
+          الخيارات أدناه لاستعادة إرسال الرسائل والذكاء الاصطناعي.
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           باقتك الحالية وحدودها، والباقات المتاحة للترقية

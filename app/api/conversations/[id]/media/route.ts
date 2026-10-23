@@ -10,6 +10,7 @@ import {
 } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { saveMediaAsset } from "@/lib/assets";
+import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
 
 type Params = { params: { id: string } };
 
@@ -27,6 +28,12 @@ export async function POST(req: Request, { params }: Params) {
   });
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
+  }
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json(
+      { error: upgradeRequiredMessage() },
+      { status: 402 }
+    );
   }
 
   let form: FormData;

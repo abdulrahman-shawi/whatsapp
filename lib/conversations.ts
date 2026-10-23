@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds, sendWhatsAppMessage, getLastWhatsAppError } from "@/lib/whatsapp";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { recalculateLeadScore } from "@/lib/scoring";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 import type { ConversationTopic } from "@/lib/sentiment";
 
 // فلتر الإسناد: الكل / محادثاتي / غير المسندة
@@ -161,6 +162,7 @@ export async function sendDueScheduledMessages(): Promise<{
   let gaveUp = 0;
   for (const item of due) {
     try {
+      if (await workspaceIsReadOnly(item.workspaceId)) continue;
       const creds = await resolveWhatsAppCreds(item.workspaceId);
       if (!creds) throw new Error("لا يوجد مزود واتساب مُعدّ");
       const ok = await sendWhatsAppMessage(

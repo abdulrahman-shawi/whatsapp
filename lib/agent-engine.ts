@@ -1,6 +1,7 @@
 import type { Agent, KnowledgeSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
 import { downloadMetaAudio, transcribeAudio } from "@/lib/audio-transcription";
 import {
   resolveWhatsAppCreds,
@@ -27,6 +28,7 @@ import { recalculateLeadScore } from "@/lib/scoring";
 import { escalateCriticalConversation } from "@/lib/critical-conversations";
 import { synthesizeVoiceReply } from "@/lib/text-to-speech";
 import { parseCsatRating } from "@/lib/csat";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -362,6 +364,17 @@ async function runPipeline(
   if (freshStatus !== "AI") {
     return { conversationId: conversation.id, reply: null, status: freshStatus };
   }
+  if (await workspaceIsReadOnly(workspaceId)) {
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { status: "HANDED_OFF" },
+    });
+    return {
+      conversationId: conversation.id,
+      reply: null,
+      status: "HANDED_OFF",
+    };
+  }
 
   // ٧.ب حد الباقة: استنفاد رصيد الرسائل أو توكنات الذكاء الاصطناعي يوقف الرد
   // الآلي ويسلّم المحادثة للفريق (الرسائل اليدوية البشرية غير محدودة)
@@ -441,7 +454,6 @@ async function runPipeline(
   }
 
   let reply: string | null;
-  let tokensUsed = 0; // توكنات OpenAI الفعلية لهذا الرد — تُحتسب عند نجاح التوليد
   if (previousInbound === 0 && agent.welcomeMessage) {
     // أول رسالة من العميل في هذه المحادثة → رسالة الترحيب
     reply = agent.welcomeMessage;
@@ -484,15 +496,19 @@ async function runPipeline(
     ];
     // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
     const aiConfig = await resolveAiConfig(workspaceId);
-    const aiReply = await generateReply(
+    const result = await generateWorkspaceReply(
+      workspaceId,
       history,
       agent.systemPrompt,
       [...knowledge, ...styleHints],
       aiConfig
     );
-    reply = aiReply?.content ?? null;
-    // استهلاك التوكنات الفعلي — يُخصم من رصيد الباقة الشهري
-    if (aiReply) tokensUsed = aiReply.usage.totalTokens;
+    reply = result.reply?.content ?? null;
+    if (result.trialExpired) {
+      console.warn(`[agent-engine] انتهت التجربة المجانية للمساحة ${workspaceId}`);
+    } else if (result.quotaExceeded) {
+      console.warn(`[agent-engine] استنفاد رصيد توكنات الذكاء الاصطناعي للمساحة ${workspaceId}`);
+    }
   }
 
   if (!reply) {
@@ -523,7 +539,7 @@ async function runPipeline(
     where: { id: conversation.id },
     data: { lastMessageAt: new Date() },
   });
-  await incrementUsage(workspaceId, tokensUsed);
+  await incrementUsage(workspaceId);
 
   // بث الرد الآلي لصندوق الوارد فورياً
   triggerNewMessage(workspaceId, conversation.id, replyMsg);

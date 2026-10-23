@@ -102,29 +102,35 @@ model User {
 
 // مساحة العمل: الكيان التجاري الذي يملك الوكلاء والمحادثات
 model Workspace {
-  id                String                 @id @default(cuid())
-  name              String
-  createdAt         DateTime               @default(now())
-  members           WorkspaceMember[]
-  agents            Agent[]
-  contacts          Contact[]
-  conversations     Conversation[]
-  dailyReports      DailyWorkspaceReport[]
-  usage             UsageRecord[]
-  settings          Setting[]
-  templates         Template[]
-  invites           WorkspaceInvite[]
-  broadcasts        BroadcastCampaign[]
-  workflows         Workflow[]
-  bookings          Booking[]
-  mediaAssets       MediaAsset[]
-  cannedResponses   CannedResponse[]
-  scheduledMessages ScheduledMessage[]
-  leadForms         LeadForm[]
-  restrictStaff     Boolean                @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
-  planId            String?
-  plan              Plan?                  @relation(fields: [planId], references: [id], onDelete: SetNull)
-  invoices          Invoice[]
+  id                            String                 @id @default(cuid())
+  name                          String
+  createdAt                     DateTime               @default(now())
+  trialStartedAt                DateTime?
+  trialEndsAt                   DateTime?
+  subdomain                     String?                @unique
+  customDomain                  String?                @unique
+  customDomainVerificationToken String?
+  customDomainVerifiedAt        DateTime?
+  members                       WorkspaceMember[]
+  agents                        Agent[]
+  contacts                      Contact[]
+  conversations                 Conversation[]
+  dailyReports                  DailyWorkspaceReport[]
+  usage                         UsageRecord[]
+  settings                      Setting[]
+  templates                     Template[]
+  invites                       WorkspaceInvite[]
+  broadcasts                    BroadcastCampaign[]
+  workflows                     Workflow[]
+  bookings                      Booking[]
+  mediaAssets                   MediaAsset[]
+  cannedResponses               CannedResponse[]
+  scheduledMessages             ScheduledMessage[]
+  leadForms                     LeadForm[]
+  restrictStaff                 Boolean                @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
+  planId                        String?
+  plan                          Plan?                  @relation(fields: [planId], references: [id], onDelete: SetNull)
+  invoices                      Invoice[]
 }
 
 // باقة الاشتراك: حدود رسائل وأعضاء ووكلاء لكل مساحة عمل

@@ -13,6 +13,7 @@ import { BillingSection } from "@/components/settings/billing-section";
 import { AppearanceForm } from "@/components/settings/appearance-form";
 import { WebhooksClient } from "@/components/webhooks/webhooks-client";
 import { ApiKeysClient } from "@/components/api-keys/api-keys-client";
+import { WorkspaceDomainsCard } from "@/components/settings/workspace-domains-card";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,13 @@ export default async function SettingsPage({
     }),
     prisma.workspace.findUnique({
       where: { id: ctx.workspaceId },
-      select: { restrictStaff: true },
+      select: {
+        restrictStaff: true,
+        subdomain: true,
+        customDomain: true,
+        customDomainVerificationToken: true,
+        customDomainVerifiedAt: true,
+      },
     }),
     prisma.inboundWebhook.findMany({
       where: { workspaceId: ctx.workspaceId },
@@ -94,6 +101,7 @@ export default async function SettingsPage({
       items: [
         { id: "members", label: "الأعضاء" },
         { id: "permissions", label: "الصلاحيات" },
+        { id: "domains", label: "النطاقات" },
         { id: "audit", label: "السجل", href: "/audit" },
       ],
     },
@@ -177,6 +185,30 @@ export default async function SettingsPage({
               <StaffPermissionsCard
                 initialRestricted={workspace?.restrictStaff ?? false}
               />
+            ),
+          },
+          {
+            id: "domains",
+            group: "المؤسسة",
+            node: (
+              <div>
+                <h3 className="text-base font-semibold">نطاقات مساحة العمل</h3>
+                <p className="mb-3 text-sm text-muted-foreground">
+                  اختر نطاقاً فرعياً أو اربط دومين شركتك. إعداد DNS/TLS لدى مزود
+                  الاستضافة مطلوب بشكل منفصل.
+                </p>
+                <WorkspaceDomainsCard
+                  initialSubdomain={workspace?.subdomain ?? null}
+                  initialCustomDomain={workspace?.customDomain ?? null}
+                  initialVerificationToken={
+                    workspace?.customDomainVerificationToken ?? null
+                  }
+                  initiallyVerified={Boolean(workspace?.customDomainVerifiedAt)}
+                  appDomain={
+                    process.env.NEXT_PUBLIC_APP_DOMAIN?.trim() || "radd.app"
+                  }
+                />
+              </div>
             ),
           },
           {

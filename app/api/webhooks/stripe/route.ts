@@ -30,7 +30,7 @@ export async function POST(req: Request) {
         if (planId) {
           await prisma.workspace.update({
             where: { id: workspaceId },
-            data: { planId },
+            data: { planId, trialEndsAt: null },
           });
         }
         await prisma.invoice.upsert({

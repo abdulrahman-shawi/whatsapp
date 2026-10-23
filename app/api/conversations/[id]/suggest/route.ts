@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 
 // اقتراح رد ذكي بناءً على تعليمات الوكيل ومصادر المعرفة وآخر ١٠ رسائل
@@ -22,6 +24,12 @@ export async function POST(
   });
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
+  }
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json(
+      { error: "انتهت التجربة المجانية؛ الترقية مطلوبة لاستخدام الذكاء الاصطناعي." },
+      { status: 402 }
+    );
   }
 
   // ترتيب الرسائل زمنياً وتحويلها لصيغة OpenAI
@@ -47,7 +55,20 @@ export async function POST(
 
   // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
   const aiConfig = await resolveAiConfig(ctx.workspaceId);
-  const aiReply = await generateReply(history, systemPrompt, knowledge, aiConfig);
+  const result = await generateWorkspaceReply(
+    ctx.workspaceId,
+    history,
+    systemPrompt,
+    knowledge,
+    aiConfig
+  );
+  if (result.quotaExceeded) {
+    return NextResponse.json(
+      { error: "تم بلوغ حد توكنات الذكاء الاصطناعي. رقِّ باقتك للمتابعة." },
+      { status: 402 }
+    );
+  }
+  const aiReply = result.reply;
   const suggestion = aiReply?.content ?? null;
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب — لا نرجع 500 أبداً هنا

@@ -10,7 +10,8 @@ import {
   mediaTypeForMime,
   getLastWhatsAppError,
 } from "@/lib/whatsapp";
-import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
 import { saveMediaAsset } from "@/lib/assets";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { runKnowledgeQuery } from "@/lib/db-knowledge";
@@ -19,6 +20,7 @@ import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
 import { recalculateLeadScore } from "@/lib/scoring";
 import { getBusinessHoursInfo } from "@/lib/business-hours";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 
 // شرط التفرع في خطوة IF
 export type IfCondition =
@@ -527,6 +529,9 @@ async function sendWorkflowMessage(
   body: string,
   templateId?: string
 ): Promise<void> {
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    throw new Error("انتهت التجربة المجانية؛ مساحة العمل للقراءة فقط");
+  }
   const creds = await resolveWhatsAppCreds(ctx.workspaceId);
   const sent = templateId
     ? await (async () => {
@@ -876,27 +881,19 @@ async function runAiReply(ctx: WorkflowContext): Promise<void> {
     ctx.waPhone
   );
   const aiConfig = await resolveAiConfig(ctx.workspaceId);
-  const aiReply = await generateReply(
+  const result = await generateWorkspaceReply(
+    ctx.workspaceId,
     history,
     conversation.agent.systemPrompt,
     knowledge,
     aiConfig
   );
+  const aiReply = result.reply;
+  if (result.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");
+  if (result.quotaExceeded) throw new Error("تم بلوغ حد توكنات الذكاء الاصطناعي");
   if (!aiReply) throw new Error("تعذّر توليد رد الذكاء الاصطناعي");
 
   await sendWorkflowMessage(ctx, aiReply.content);
-
-  // احتساب التوكنات المستهلكة في رصيد الباقة الشهري
-  const month = new Date().toISOString().slice(0, 7);
-  await prisma.usageRecord.upsert({
-    where: { workspaceId_month: { workspaceId: ctx.workspaceId, month } },
-    update: { tokensUsed: { increment: aiReply.usage.totalTokens } },
-    create: {
-      workspaceId: ctx.workspaceId,
-      month,
-      tokensUsed: aiReply.usage.totalTokens,
-    },
-  });
 }
 
 // جلب محادثة مع وكيلها ومصادر معرفته — يخدم SEARCH_KNOWLEDGE وQUERY_DB
@@ -1190,12 +1187,16 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
         `الخيارات: ${options.join(" | ")}`,
         `أجب بأحد الخيارات حرفياً وبلا أي شرح إضافي.`,
       ].join("\n");
-      const result = await generateReply(
+      const aiResult = await generateWorkspaceReply(
+        ctx.workspaceId,
         [{ role: "user", content: ctx.text || "(لا يوجد نص)" }],
         systemPrompt,
         [],
         aiConfig
       );
+      const result = aiResult.reply;
+      if (aiResult.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");
+      if (aiResult.quotaExceeded) throw new Error("تم بلوغ حد توكنات الذكاء الاصطناعي");
       if (!result) throw new Error("تعذّر تصنيف النص");
       // نتطابق الخيار المعاد — أي خيار يظهر في الرد (حساسية حالة غير مهمة)
       const reply = result.content.trim();
@@ -1204,17 +1205,6 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
         options.find((o) => reply.toLowerCase().includes(o.toLowerCase())) ??
         "";
       ctx.vars[step.var.trim()] = matched;
-      // احتساب التوكنات في رصيد الباقة
-      const month = new Date().toISOString().slice(0, 7);
-      await prisma.usageRecord.upsert({
-        where: { workspaceId_month: { workspaceId: ctx.workspaceId, month } },
-        update: { tokensUsed: { increment: result.usage.totalTokens } },
-        create: {
-          workspaceId: ctx.workspaceId,
-          month,
-          tokensUsed: result.usage.totalTokens,
-        },
-      });
       if (!matched) return `تصنيف بلا تطابق — {{${step.var.trim()}}} فارغ (الرد: ${reply.slice(0, 40)})`;
       return `صُنّف النص إلى "${matched}" في {{${step.var.trim()}}}`;
     }

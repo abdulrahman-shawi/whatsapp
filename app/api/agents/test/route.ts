@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
-import { generateReply, resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { resolveAiConfig, type ChatMessage } from "@/lib/openai";
+import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
+import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
 
 // تجربة الوكيل دون حفظ: يستقبل حالة النموذج مباشرة ويعيد رداً تجريبياً
 export async function POST(req: Request) {
   const ctx = await getWorkspaceContext();
   if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json(
+      { error: "انتهت التجربة المجانية؛ الترقية مطلوبة لاستخدام الذكاء الاصطناعي." },
+      { status: 402 }
+    );
+  }
 
   const body = await req.json().catch(() => null);
   if (
@@ -31,7 +39,20 @@ export async function POST(req: Request) {
 
   // لا يوجد وكيل محفوظ بعد — نستخدم إعدادات مساحة عمل المستخدم مباشرة
   const aiConfig = await resolveAiConfig(ctx.workspaceId);
-  const aiReply = await generateReply(messages, body.systemPrompt, knowledge, aiConfig);
+  const result = await generateWorkspaceReply(
+    ctx.workspaceId,
+    messages,
+    body.systemPrompt,
+    knowledge,
+    aiConfig
+  );
+  if (result.quotaExceeded) {
+    return NextResponse.json(
+      { error: "تم بلوغ حد توكنات الذكاء الاصطناعي. رقِّ باقتك للمتابعة." },
+      { status: 402 }
+    );
+  }
+  const aiReply = result.reply;
   const reply = aiReply?.content ?? null;
 
   // بديل لطيف عند غياب المفتاح أو فشل الطلب

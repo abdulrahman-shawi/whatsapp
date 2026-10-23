@@ -9,6 +9,7 @@ import {
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getStaffRestrictionFilter } from "@/lib/conversations";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
 
 type Params = { params: { id: string } };
 
@@ -56,7 +57,6 @@ export async function GET(req: Request, { params }: Params) {
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
   }
-
   // قيود الموظف: عند تفعيل التقييد لا يرى الموظف سوى محادثاته المسندة إليه
   const restrictToUserId = await getStaffRestrictionFilter(
     ctx.workspaceId,
@@ -150,6 +150,12 @@ export async function POST(req: Request, { params }: Params) {
   });
   if (!conversation) {
     return NextResponse.json({ error: "المحادثة غير موجودة" }, { status: 404 });
+  }
+  if (await workspaceIsReadOnly(ctx.workspaceId)) {
+    return NextResponse.json(
+      { error: upgradeRequiredMessage() },
+      { status: 402 }
+    );
   }
 
   const message = await prisma.message.create({

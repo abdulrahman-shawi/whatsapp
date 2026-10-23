@@ -35,8 +35,13 @@ export function IntegrationsForm({
       const res = await fetch("/api/settings/test-ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // نختبر ما كُتب في الحقل (حتى قبل الحفظ) — والمحفوظ إن كان فارغاً
-        body: JSON.stringify({ apiKey: draft.OPENAI_API_KEY ?? "" }),
+        // نختبر ما في الحقول كما هي معروضة (حتى قبل الحفظ) — والمحفوظ للحقول الفارغة
+        body: JSON.stringify({
+          apiKey: draft.OPENAI_API_KEY ?? "",
+          provider: draft.AI_PROVIDER ?? "",
+          baseUrl: draft.AI_BASE_URL ?? "",
+          model: draft.AI_MODEL ?? "",
+        }),
       });
       const data = await res.json().catch(() => null);
       if (data?.ok) {

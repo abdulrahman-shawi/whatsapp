@@ -8,6 +8,7 @@ import {
 import { getUsageStatus } from "@/lib/billing/plans";
 import { isContactStage, type ContactStageValue } from "@/lib/contact-stages";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
 
 // حد جمهور الحملة الواحدة — يحافظ على اكتمال الإرسال ضمن مهلة Vercel
 const MAX_AUDIENCE = 500;
@@ -124,6 +125,10 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
       status: "FAILED",
     });
   };
+  if (await workspaceIsReadOnly(campaign.workspaceId)) {
+    await failBeforeSending(upgradeRequiredMessage());
+    return;
+  }
   if (campaign.templateId && !template) {
     await failBeforeSending("قالب الحملة غير موجود في مساحة العمل");
     return;
@@ -244,7 +249,7 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
       failed++;
       if (variant === "B") failedB++;
     }
-    await prisma.$transaction([
+    const updates: Prisma.PrismaPromise<unknown>[] = [
       prisma.broadcastCampaign.update({
         where: { id: campaign.id },
         data: {
@@ -255,14 +260,21 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
           status: "SENDING",
         },
       }),
-      prisma.usageRecord.upsert({
+    ];
+    if (ok) {
+      updates.push(prisma.usageRecord.upsert({
         where: {
           workspaceId_month: { workspaceId: campaign.workspaceId, month },
         },
         update: { messagesUsed: { increment: 1 } },
-        create: { workspaceId: campaign.workspaceId, month, messagesUsed: 1 },
-      }),
-    ]);
+        create: {
+          workspaceId: campaign.workspaceId,
+          month,
+          messagesUsed: 1,
+        },
+      }));
+    }
+    await prisma.$transaction(updates);
   }
 
   const status = failed === 0 ? "SENT" : sent === 0 ? "FAILED" : "PARTIAL";

@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
   await prisma.workspace.update({
     where: { id: workspaceId },
-    data: { planId: plan.id },
+    data: { planId: plan.id, trialEndsAt: null },
   });
   return NextResponse.json({ ok: true, plan: plan.code });
 }

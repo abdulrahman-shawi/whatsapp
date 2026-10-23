@@ -76,7 +76,7 @@ export async function POST(req: Request) {
     "أنت مساعد تجريبي. رد بكلمة واحدة فقط.",
     [],
     effectiveConfig,
-    300,
+    1024,
     errorInfo
   );
   if (result.trialExpired) {

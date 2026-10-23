@@ -501,7 +501,8 @@ async function runPipeline(
       history,
       agent.systemPrompt,
       [...knowledge, ...styleHints],
-      aiConfig
+      aiConfig,
+      2048
     );
     reply = result.reply?.content ?? null;
     if (result.trialExpired) {

@@ -44,7 +44,8 @@ export async function POST(req: Request) {
     messages,
     body.systemPrompt,
     knowledge,
-    aiConfig
+    aiConfig,
+    1024
   );
   if (result.quotaExceeded) {
     return NextResponse.json(

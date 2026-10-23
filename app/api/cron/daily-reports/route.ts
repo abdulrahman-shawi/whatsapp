@@ -158,7 +158,7 @@ async function createDailyReport(
     ].join("\n"),
     [],
     config,
-    1200
+    2048
   );
   if (result.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");
   if (result.quotaExceeded) throw new Error("تم بلوغ حد توكنات الذكاء الاصطناعي");

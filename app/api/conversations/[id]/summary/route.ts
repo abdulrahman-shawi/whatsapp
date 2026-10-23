@@ -59,7 +59,8 @@ export async function POST(
     ],
     "أنت مساعد يلخص محادثات خدمة عملاء للموظف الذي سيتسلمها. استخدم النقاط المختصرة: طلب العميل، ما تم الاتفاق عليه، مواعيد أو مبالغ ذُكرت، وما تبقّى مطلوباً من الفريق.",
     [],
-    config
+    config,
+    2048
   );
   if (result.quotaExceeded) {
     return NextResponse.json(

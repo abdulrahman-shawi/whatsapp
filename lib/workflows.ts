@@ -886,7 +886,8 @@ async function runAiReply(ctx: WorkflowContext): Promise<void> {
     history,
     conversation.agent.systemPrompt,
     knowledge,
-    aiConfig
+    aiConfig,
+    2048
   );
   const aiReply = result.reply;
   if (result.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");
@@ -1192,7 +1193,8 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
         [{ role: "user", content: ctx.text || "(لا يوجد نص)" }],
         systemPrompt,
         [],
-        aiConfig
+        aiConfig,
+        512
       );
       const result = aiResult.reply;
       if (aiResult.trialExpired) throw new Error("انتهت التجربة المجانية؛ يلزم ترقية الباقة");

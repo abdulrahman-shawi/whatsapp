@@ -95,7 +95,7 @@ export async function POST(
     instruction,
     [],
     await resolveAiConfig(ctx.workspaceId),
-    800
+    1024
   );
   if (result.quotaExceeded) {
     return NextResponse.json(

@@ -60,7 +60,8 @@ export async function POST(
     history,
     systemPrompt,
     knowledge,
-    aiConfig
+    aiConfig,
+    1024
   );
   if (result.quotaExceeded) {
     return NextResponse.json(

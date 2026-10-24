@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { parseSkillPrompts } from "@/lib/agent-prompt";
 import { AgentStudio } from "@/components/agents/agent-studio";
 import { AgentVersions } from "@/components/agents/agent-versions";
 
@@ -56,6 +57,7 @@ export default async function EditAgentPage({
           skills: Array.isArray(agent.skills)
             ? agent.skills.filter((k): k is string => typeof k === "string")
             : [],
+          skillPrompts: parseSkillPrompts(agent.skillPrompts),
           knowledgeSources: agent.knowledgeSources.map((s) => ({
             id: s.id,
             title: s.title,

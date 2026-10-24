@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { parseInstructionBlocks, parseSkills } from "@/lib/agent-prompt";
+import { parseInstructionBlocks, parseSkills, parseSkillPrompts } from "@/lib/agent-prompt";
 
 type Params = { params: { id: string } };
 
@@ -96,6 +96,16 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     data.skills = parseSkills(body.skills);
   }
+  if (body.skillPrompts !== undefined) {
+    if (
+      !body.skillPrompts ||
+      typeof body.skillPrompts !== "object" ||
+      Array.isArray(body.skillPrompts)
+    ) {
+      return NextResponse.json({ error: "نصوص المهارات غير صالحة" }, { status: 400 });
+    }
+    data.skillPrompts = parseSkillPrompts(body.skillPrompts);
+  }
   if (body.isActive !== undefined) {
     if (typeof body.isActive !== "boolean") {
       return NextResponse.json({ error: "قيمة التفعيل غير صالحة" }, { status: 400 });
@@ -131,6 +141,7 @@ export async function PATCH(req: Request, { params }: Params) {
       handoffKeywords: agent.handoffKeywords,
       instructions: agent.instructions as Prisma.InputJsonValue,
       skills: agent.skills as Prisma.InputJsonValue,
+      skillPrompts: agent.skillPrompts as Prisma.InputJsonValue,
       knowledge,
       createdById: ctx.userId,
     },

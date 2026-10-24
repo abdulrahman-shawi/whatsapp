@@ -59,6 +59,7 @@ export async function POST(req: Request) {
       systemPrompt: body.systemPrompt,
       instructions: body.instructions,
       skills: body.skills,
+      skillPrompts: body.skillPrompts,
     });
     skills = parseSkills(body.skills);
     knowledge = Array.isArray(body.knowledge)

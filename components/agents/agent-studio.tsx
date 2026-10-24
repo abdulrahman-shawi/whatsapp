@@ -6,11 +6,14 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  CheckCircle2,
   ChevronDown,
+  Contact,
   Database,
   FileText,
   FileUp,
   Globe,
+  Headset,
   Lightbulb,
   Library,
   Loader2,
@@ -19,7 +22,10 @@ import {
   Save,
   Settings2,
   Sparkles,
+  StickyNote,
   Trash2,
+  TrendingUp,
+  Wand2,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +43,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
 import { AGENT_SKILLS } from "@/lib/agent-skills";
+import { parseSkillPrompts } from "@/lib/agent-prompt";
 import { TestChat } from "./test-chat";
+
+// أيقونة لكل مهارة في بطاقتها وشريط الاختيار
+const SKILL_ICONS: Record<string, typeof Contact> = {
+  update_contact: Contact,
+  update_stage: TrendingUp,
+  add_note: StickyNote,
+  request_handoff: Headset,
+  close_conversation: CheckCircle2,
+};
 
 // بيانات الوكيل كما تصل من الصفحة (خادم) إلى الاستوديو
 export type StudioKnowledgeItem = {
@@ -62,6 +78,7 @@ export type StudioAgent = {
   updatedAt: string;
   instructions: { id: string; title: string; content: string }[];
   skills: string[];
+  skillPrompts: Record<string, string>;
   knowledgeSources: StudioKnowledgeItem[];
 };
 
@@ -156,6 +173,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
     isActive: agent?.isActive ?? true,
     instructions: agent?.instructions ?? [],
     skills: agent?.skills ?? [],
+    skillPrompts: agent?.skillPrompts ?? {},
   });
 
   const [name, setName] = useState(initial.current.name);
@@ -164,6 +182,9 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
     initial.current.instructions
   );
   const [skills, setSkills] = useState<string[]>(initial.current.skills);
+  const [skillPrompts, setSkillPrompts] = useState<Record<string, string>>(
+    initial.current.skillPrompts
+  );
   const [welcomeMessage, setWelcomeMessage] = useState(initial.current.welcomeMessage);
   const [offHoursReply, setOffHoursReply] = useState(initial.current.offHoursReply);
   const [responseDelaySec, setResponseDelaySec] = useState(
@@ -188,10 +209,14 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
   const [activeTab, setActiveTab] = useState<"test" | "knowledge">("test");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // حقول قوالب المطالبات والإرشاد — القائمة المنبثقة تُدرج في القسم المفتوح
+  // حقول قوالب المطالبات والإرشاد — القائمة المنبثقة تُدرج في القسم/المهارة المفتوحة
   const [templateFor, setTemplateFor] = useState<string | null>(null);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideFor, setGuideFor] = useState<string | null>(null);
+  const [skillTemplateFor, setSkillTemplateFor] = useState<string | null>(null);
+  const [skillGuideFor, setSkillGuideFor] = useState<string | null>(null);
+  const [improvingSkill, setImprovingSkill] = useState<string | null>(null);
   const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
+  const skillTextareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
 
   const snapshot = useMemo(
     () => ({
@@ -205,6 +230,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
       isActive,
       instructions,
       skills,
+      skillPrompts,
     }),
     [
       name,
@@ -217,6 +243,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
       isActive,
       instructions,
       skills,
+      skillPrompts,
     ]
   );
   const dirty = JSON.stringify(snapshot) !== JSON.stringify(initial.current);
@@ -227,6 +254,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
     setSystemPrompt(i.systemPrompt);
     setInstructions(i.instructions);
     setSkills(i.skills);
+    setSkillPrompts(i.skillPrompts);
     setWelcomeMessage(i.welcomeMessage);
     setOffHoursReply(i.offHoursReply);
     setResponseDelaySec(i.responseDelaySec);
@@ -247,6 +275,54 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
     setSkills((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
+  }
+
+  // نص المهارة المعروض في بطاقتها: المخصص إن وُجد وإلا الافتراضي
+  function skillText(key: string): string {
+    return skillPrompts[key] ?? AGENT_SKILLS.find((s) => s.key === key)?.behavior ?? "";
+  }
+
+  function setSkillText(key: string, text: string) {
+    setSkillPrompts((prev) => ({ ...prev, [key]: text }));
+  }
+
+  // إدراج قالب في نص مهارة عند موضع المؤشر
+  function insertSkillTemplate(key: string, text: string) {
+    const ta = skillTextareaRefs.current.get(key);
+    const current = skillText(key);
+    const at = ta ? ta.selectionStart ?? current.length : current.length;
+    setSkillText(key, `${current.slice(0, at)}${text}${current.slice(at)}`);
+    setSkillTemplateFor(null);
+    requestAnimationFrame(() => {
+      const el = skillTextareaRefs.current.get(key);
+      if (el) {
+        el.focus();
+        const pos = at + text.length;
+        el.setSelectionRange(pos, pos);
+      }
+    });
+  }
+
+  // تحسين نص المهارة بالذكاء الاصطناعي — يستبدل النص بنسخة محسّنة
+  async function improveSkill(key: string, name: string) {
+    const text = skillText(key).trim();
+    if (improvingSkill || text.length < 10) return;
+    setImprovingSkill(key);
+    try {
+      const res = await fetch("/api/agents/improve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, skillName: name }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.improved) {
+        setSkillText(key, data.improved);
+      } else {
+        setError(data?.error ?? "تعذّر التحسين حالياً");
+      }
+    } finally {
+      setImprovingSkill(null);
+    }
   }
 
   function updateBlock(id: string, patch: Partial<InstructionBlock>) {
@@ -471,12 +547,14 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
                       <button
                         type="button"
                         className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                        onClick={() => setGuideOpen((v) => !v)}
+                        onClick={() =>
+                          setGuideFor(guideFor === block.id ? null : block.id)
+                        }
                       >
                         <BookOpen className="h-3.5 w-3.5" />
                         تعلم كيفية كتابة هذا
                       </button>
-                      {guideOpen && (
+                      {guideFor === block.id && (
                         <div className="absolute start-0 top-full z-30 mt-1 w-72 rounded-md border bg-popover p-3 shadow-md">
                           <ul className="space-y-1.5 text-xs text-muted-foreground">
                             {WRITING_GUIDE.map((tip) => (
@@ -515,13 +593,15 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">هل تحتاج إلى المزيد من الخيارات؟</CardTitle>
               <CardDescription>
-                مهارات تنفَّذ فعلياً أثناء المحادثة — يستدعيها الوكيل عند الحاجة
+                مهارات تنفَّذ فعلياً أثناء المحادثة — اختر مهارة لتظهر بطاقتها وتخصيص
+                تعليماتها
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 {AGENT_SKILLS.map((skill) => {
                   const on = skills.includes(skill.key);
+                  const Icon = SKILL_ICONS[skill.key] ?? Sparkles;
                   return (
                     <button
                       key={skill.key}
@@ -534,7 +614,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
                           : "text-muted-foreground hover:bg-muted"
                       )}
                     >
-                      <Sparkles className="h-3.5 w-3.5" />
+                      <Icon className="h-3.5 w-3.5" />
                       {skill.name}
                       <Toggle
                         checked={on}
@@ -545,8 +625,125 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
                   );
                 })}
               </div>
+
+              {/* بطاقة لكل مهارة مفعّلة — تخصيص تعليماتها */}
+              {AGENT_SKILLS.filter((s) => skills.includes(s.key)).map((skill) => {
+                const Icon = SKILL_ICONS[skill.key] ?? Sparkles;
+                return (
+                  <div
+                    key={skill.key}
+                    className="space-y-2 rounded-lg border bg-card p-4"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Icon className="h-4 w-4 text-primary" />
+                        {skill.name}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => toggleSkill(skill.key)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      متى وكيف ينبغي أداء هذه المهارة؟ عدّل التعليمات أو أضف من
+                      القوالب.
+                    </p>
+                    <Textarea
+                      ref={(el) => {
+                        if (el) skillTextareaRefs.current.set(skill.key, el);
+                        else skillTextareaRefs.current.delete(skill.key);
+                      }}
+                      value={skillText(skill.key)}
+                      onChange={(e) => setSkillText(skill.key, e.target.value)}
+                      rows={3}
+                    />
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      {/* قوالب المهارة */}
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setSkillTemplateFor(
+                              skillTemplateFor === skill.key ? null : skill.key
+                            )
+                          }
+                        >
+                          <Library className="h-3.5 w-3.5" />
+                          إضافة قوالب مطالبات
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </Button>
+                        {skillTemplateFor === skill.key && (
+                          <div className="absolute start-0 top-full z-30 mt-1 w-72 rounded-md border bg-popover p-1 shadow-md">
+                            {skill.templates.map((t) => (
+                              <button
+                                key={t.name}
+                                type="button"
+                                onClick={() => insertSkillTemplate(skill.key, t.text)}
+                                className="block w-full rounded-sm px-2 py-1.5 text-start text-xs hover:bg-accent"
+                              >
+                                {t.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {/* دليل الكتابة */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                          onClick={() =>
+                            setSkillGuideFor(
+                              skillGuideFor === skill.key ? null : skill.key
+                            )
+                          }
+                        >
+                          <BookOpen className="h-3.5 w-3.5" />
+                          تعلم كيفية كتابة هذا
+                        </button>
+                        {skillGuideFor === skill.key && (
+                          <div className="absolute start-0 top-full z-30 mt-1 w-72 rounded-md border bg-popover p-3 shadow-md">
+                            <ul className="space-y-1.5 text-xs text-muted-foreground">
+                              {WRITING_GUIDE.map((tip) => (
+                                <li key={tip} className="flex gap-1.5">
+                                  <Lightbulb className="h-3.5 w-3.5 shrink-0 text-primary" />
+                                  {tip}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                      {/* تحسين بالذكاء الاصطناعي */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="ms-auto"
+                        disabled={improvingSkill !== null || skillText(skill.key).trim().length < 10}
+                        onClick={() => improveSkill(skill.key, skill.name)}
+                      >
+                        {improvingSkill === skill.key ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3.5 w-3.5" />
+                        )}
+                        تحسين
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+
               {skills.length > 0 && (
-                <p className="mt-3 text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   المهارات المفعّلة تستهلك توكنات إضافية عند استدعائها أثناء الرد.
                 </p>
               )}
@@ -717,6 +914,7 @@ export function AgentStudio({ agent }: { agent?: StudioAgent }) {
                 systemPrompt={systemPrompt}
                 instructions={instructions}
                 skills={skills}
+                skillPrompts={skillPrompts}
                 knowledge={allKnowledge}
               />
             ) : (

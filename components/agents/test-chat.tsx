@@ -24,12 +24,14 @@ export function TestChat({
   systemPrompt,
   instructions,
   skills,
+  skillPrompts,
   knowledge,
 }: {
   agentId?: string;
   systemPrompt: string;
   instructions?: { id: string; title: string; content: string }[];
   skills?: string[];
+  skillPrompts?: Record<string, string>;
   knowledge: string[];
 }) {
   const [messages, setMessages] = useState<TestMessage[]>([]);
@@ -55,7 +57,7 @@ export function TestChat({
         body: JSON.stringify(
           agentId
             ? { agentId, messages: next }
-            : { systemPrompt, instructions, skills, knowledge, messages: next }
+            : { systemPrompt, instructions, skills, skillPrompts, knowledge, messages: next }
         ),
       });
       if (res.ok) {

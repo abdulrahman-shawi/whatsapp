@@ -3,6 +3,7 @@ import {
   buildAgentSystemPrompt,
   parseInstructionBlocks,
   parseSkills,
+  parseSkillPrompts,
 } from "@/lib/agent-prompt";
 
 describe("parseInstructionBlocks", () => {
@@ -46,7 +47,7 @@ describe("parseSkills", () => {
 });
 
 describe("buildAgentSystemPrompt", () => {
-  it("assembles base, instruction sections and skill behaviors", () => {
+  it("assembles base, instruction sections and per-skill sections", () => {
     const prompt = buildAgentSystemPrompt({
       systemPrompt: "أنت مساعد متجر مهذب.",
       instructions: [
@@ -59,10 +60,22 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("أنت مساعد متجر مهذب.");
     expect(prompt).toContain("## الشكاوى\nإذا اشتكى العميل: اعتذر وصعّد للمدير.");
     expect(prompt).toContain("## الأسعار");
-    expect(prompt).toContain("## مهاراتك أثناء المحادثة");
-    expect(prompt.indexOf("update_contact")).toBe(-1);
+    // كل مهارة قسم مستقل باسمها
+    expect(prompt).toContain("## تحديث بيانات العميل");
+    expect(prompt).toContain("## تحديث مرحلة العميل");
     expect(prompt).toContain("حدّث بيانات جهة الاتصال");
     expect(prompt).toContain("حدّث مرحلته");
+    expect(prompt).not.toContain("update_contact");
+  });
+
+  it("uses custom skill prompt text when provided", () => {
+    const prompt = buildAgentSystemPrompt({
+      systemPrompt: "أساس",
+      skills: ["add_note"],
+      skillPrompts: { add_note: "سجّل ملاحظة عند كل طلب خاص بالشحن." },
+    });
+    expect(prompt).toContain("## إضافة تعليقات\nسجّل ملاحظة عند كل طلب خاص بالشحن.");
+    expect(prompt).not.toContain("تستحق التوثيق");
   });
 
   it("omits sections when empty and ignores unknown skills", () => {
@@ -73,5 +86,24 @@ describe("buildAgentSystemPrompt", () => {
     });
     expect(prompt).toBe("أساس فقط");
     expect(prompt).not.toContain("##");
+  });
+});
+
+describe("parseSkillPrompts", () => {
+  it("keeps non-empty texts for known skills only", () => {
+    expect(
+      parseSkillPrompts({
+        add_note: "  نص مخصص  ",
+        update_stage: "",
+        unknown_skill: "نص",
+        update_contact: 5,
+      })
+    ).toEqual({ add_note: "نص مخصص" });
+  });
+
+  it("returns empty for non-object values", () => {
+    expect(parseSkillPrompts(null)).toEqual({});
+    expect(parseSkillPrompts(["a"])).toEqual({});
+    expect(parseSkillPrompts("نص")).toEqual({});
   });
 });

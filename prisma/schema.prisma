@@ -332,6 +332,7 @@ model Agent {
   handoffKeywords  String[] // كلمات تفعيل التحويل لموظف بشري
   instructions     Json              @default("[]") // أقسام التعليمات الإضافية [{id, title, content}]
   skills           Json              @default("[]") // مفاتيح المهارات المفعّلة (update_contact | update_stage | add_note | request_handoff | close_conversation)
+  skillPrompts     Json              @default("{}") // نصوص مخصصة لكل مهارة {update_contact: "...", ...} — تظهر في بطاقة المهارة بالاستوديو
   isActive         Boolean           @default(true)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -353,6 +354,7 @@ model AgentVersion {
   handoffKeywords  String[]
   instructions     Json     @default("[]") // لقطة أقسام التعليمات
   skills           Json     @default("[]") // لقطة المهارات المفعّلة
+  skillPrompts     Json     @default("{}") // لقطة نصوص المهارات المخصصة
   knowledge        Json     @default("[]") // لقطة لمصادر المعرفة [{title, type, content}]
   createdById      String?
   createdAt        DateTime @default(now())

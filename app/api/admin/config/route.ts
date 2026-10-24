@@ -34,10 +34,17 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "مدير المنصة فقط" }, { status: 403 });
 
   const config = await getPlatformConfig();
+  // الحقول غير السرية تُعرض كاملة (قائمة مزود، نموذج، رابط) — السرية مقنّعة دائماً
+  const NON_SECRET = new Set<string>([
+    "SUPPORT_WHATSAPP",
+    "AI_PROVIDER",
+    "AI_MODEL",
+    "AI_BASE_URL",
+  ]);
   const masked = Object.fromEntries(
     PLATFORM_CONFIG_KEYS.map((k) => [
       k,
-      k === "SUPPORT_WHATSAPP" ? config[k] : maskSecret(config[k]),
+      NON_SECRET.has(k) ? config[k] : maskSecret(config[k]),
     ])
   );
   return NextResponse.json({ config: masked });

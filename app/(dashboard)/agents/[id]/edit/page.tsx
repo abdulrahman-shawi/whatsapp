@@ -1,12 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { AgentForm } from "@/components/agents/agent-form";
+import { AgentStudio } from "@/components/agents/agent-studio";
 import { AgentVersions } from "@/components/agents/agent-versions";
 
 export const dynamic = "force-dynamic";
 
-// تعديل وكيل موجود — يُجلب مع مصادر معرفته
+// تعديل وكيل موجود — يُجلب مع مصادر معرفته إلى الاستوديو
 export default async function EditAgentPage({
   params,
 }: {
@@ -22,9 +22,8 @@ export default async function EditAgentPage({
   if (!agent) notFound();
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold">تعديل: {agent.name}</h1>
-      <AgentForm
+    <div className="mx-auto max-w-6xl space-y-6">
+      <AgentStudio
         agent={{
           id: agent.id,
           name: agent.name,
@@ -35,14 +34,35 @@ export default async function EditAgentPage({
           voiceReplies: agent.voiceReplies,
           handoffKeywords: agent.handoffKeywords,
           isActive: agent.isActive,
+          updatedAt: agent.updatedAt.toISOString(),
+          instructions: Array.isArray(agent.instructions)
+            ? agent.instructions
+                .filter(
+                  (b): b is { id?: string; title: string; content: string } =>
+                    Boolean(b) &&
+                    typeof b === "object" &&
+                    typeof (b as { title?: unknown }).title === "string" &&
+                    typeof (b as { content?: unknown }).content === "string"
+                )
+                .map((b, i) => ({
+                  id:
+                    typeof b.id === "string" && b.id
+                      ? b.id
+                      : `block-${i}`,
+                  title: b.title,
+                  content: b.content,
+                }))
+            : [],
+          skills: Array.isArray(agent.skills)
+            ? agent.skills.filter((k): k is string => typeof k === "string")
+            : [],
           knowledgeSources: agent.knowledgeSources.map((s) => ({
             id: s.id,
             title: s.title,
             type: s.type,
             content: s.content,
-            dbEngine: s.dbEngine,
-            dbHost: s.dbHost,
-            dbQuery: s.dbQuery,
+            url: s.url,
+            lastSyncedAt: s.lastSyncedAt ? s.lastSyncedAt.toISOString() : null,
           })),
         }}
       />

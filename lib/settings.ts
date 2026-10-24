@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { getPlatformConfig, type PlatformConfig } from "@/lib/platform-config";
 
-// مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً ثم .env كبديل
+// مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً، ثم إعدادات المنصة من لوحة المدير، ثم .env كبديل
 export const INTEGRATION_KEYS = [
   { key: "AI_PROVIDER", label: "مزوّد الذكاء الاصطناعي", env: ["AI_PROVIDER"] },
   {
@@ -102,8 +103,23 @@ export function isIntegrationKey(key: string): key is IntegrationKey {
   return KEY_SET.has(key);
 }
 
-// قيمة .env البديلة لمفتاح — يجرّب كل الأسماء المعروفة بالترتيب
-function envFallback(def: (typeof INTEGRATION_KEYS)[number]): string | null {
+// المفاتيح التي يستطيع مالك المنصة ضبطها من لوحة /admin كافتراضي لكل المساحات
+const PLATFORM_MANAGED = new Set<string>([
+  "OPENAI_API_KEY",
+  "AI_PROVIDER",
+  "AI_MODEL",
+  "AI_BASE_URL",
+]);
+
+// قيمة البديلة لمفتاح: إعدادات المنصة (لوحة المدير) أولاً ثم .env — يجرّب كل الأسماء المعروفة بالترتيب
+async function envFallback(
+  def: (typeof INTEGRATION_KEYS)[number]
+): Promise<string | null> {
+  if (PLATFORM_MANAGED.has(def.key)) {
+    const platform = await getPlatformConfig();
+    const v = platform[def.key as keyof PlatformConfig]?.trim();
+    if (v) return v;
+  }
   for (const name of def.env) {
     const v = process.env[name];
     if (v) return v;
@@ -129,7 +145,7 @@ export async function getIntegration(
 export async function getIntegrationCandidates(key: IntegrationKey): Promise<string[]> {
   const def = INTEGRATION_KEYS.find((d) => d.key === key)!;
   const values = new Set<string>();
-  const envVal = envFallback(def);
+  const envVal = await envFallback(def);
   if (envVal) values.add(envVal);
   const rows = await prisma.setting.findMany({ where: { key } });
   for (const r of rows) if (r.value) values.add(r.value);
@@ -174,7 +190,7 @@ export type IntegrationInfo = {
   value: string | null;
   secret: boolean;
   options: readonly { value: string; label: string }[] | null;
-  source: "db" | "env" | null;
+  source: "db" | "platform" | "env" | null;
 };
 
 // قائمة مقنّعة للعرض في الواجهة — القيم السرية لا تُرجع خاماً أبداً
@@ -185,21 +201,23 @@ export async function getIntegrationList(
     where: { workspaceId, key: { in: [...KEY_SET] } },
   });
 
-  return INTEGRATION_KEYS.map((def) => {
-    const secret = !NON_SECRET.has(def.key);
-    const options = KEY_OPTIONS[def.key] ?? null;
-    const row = rows.find((r) => r.key === def.key);
-    const raw = row?.value || envFallback(def);
-    const source = row?.value ? "db" : raw ? "env" : null;
-    return {
-      key: def.key,
-      label: def.label,
-      envName: def.env[0] ?? "",
-      masked: secret && raw ? mask(raw) : null,
-      value: secret ? null : raw,
-      secret,
-      options,
-      source,
-    };
-  });
+  return Promise.all(
+    INTEGRATION_KEYS.map(async (def) => {
+      const secret = !NON_SECRET.has(def.key);
+      const options = KEY_OPTIONS[def.key] ?? null;
+      const row = rows.find((r) => r.key === def.key);
+      const raw = row?.value || (await envFallback(def));
+      const source = row?.value ? "db" : raw ? "env" : null;
+      return {
+        key: def.key,
+        label: def.label,
+        envName: def.env[0] ?? "",
+        masked: secret && raw ? mask(raw) : null,
+        value: secret ? null : raw,
+        secret,
+        options,
+        source,
+      };
+    })
+  );
 }

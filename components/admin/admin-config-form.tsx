@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const FIELDS: { key: string; label: string; hint: string; secret: boolean }[] = [
+const FIELDS: { key: string; label: string; hint: string; secret: boolean; options?: string[] }[] = [
   {
     key: "STRIPE_SECRET_KEY",
     label: "المفتاح السري لـ Stripe",
@@ -42,6 +42,31 @@ const FIELDS: { key: string; label: string; hint: string; secret: boolean }[] = 
     key: "SUPPORT_WHATSAPP",
     label: "رقم واتساب الدعم",
     hint: "يظهر للعملاء في صفحة الاشتراك عند الحاجة للتواصل",
+    secret: false,
+  },
+  {
+    key: "AI_PROVIDER",
+    label: "مزوّد الذكاء الاصطناعي الافتراضي",
+    hint: "يُستخدم لكل مساحات العمل التي لم تضبط مزوّدها الخاص في الإعدادات",
+    secret: false,
+    options: ["openai", "gemini", "kimi", "openrouter", "custom"],
+  },
+  {
+    key: "OPENAI_API_KEY",
+    label: "مفتاح الذكاء الاصطناعي الافتراضي (API Key)",
+    hint: "مفتاح المزود المختار أعلاه — لكل العملاء، وتستطيع أي مساحة عمل تجاوزه بمفتاحها الخاص",
+    secret: true,
+  },
+  {
+    key: "AI_MODEL",
+    label: "اسم النموذج الافتراضي (اختياري)",
+    hint: "مثال: kimi-k2.6 — اتركه فارغاً لنموذج المزوّد الافتراضي",
+    secret: false,
+  },
+  {
+    key: "AI_BASE_URL",
+    label: "رابط API مخصص (اختياري)",
+    hint: "إلزامي فقط عند اختيار المزوّد المخصص (custom)",
     secret: false,
   },
 ];
@@ -115,18 +140,41 @@ export function AdminConfigForm() {
           FIELDS.map((f) => (
             <div key={f.key} className="space-y-1.5">
               <Label htmlFor={f.key}>{f.label}</Label>
-              <Input
-                id={f.key}
-                dir="ltr"
-                className="text-left"
-                type={f.secret ? "password" : "text"}
-                autoComplete="off"
-                placeholder={masked[f.key] || "غير مضبوط"}
-                value={values[f.key] ?? ""}
-                onChange={(e) =>
-                  setValues((prev) => ({ ...prev, [f.key]: e.target.value }))
-                }
-              />
+              {f.options ? (
+                <select
+                  id={f.key}
+                  dir="ltr"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={values[f.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [f.key]: e.target.value }))
+                  }
+                >
+                  <option value="">
+                    {masked[f.key]
+                      ? `الحالي: ${masked[f.key]}`
+                      : "غير مضبوط (الافتراضي: openai)"}
+                  </option>
+                  {f.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id={f.key}
+                  dir="ltr"
+                  className="text-left"
+                  type={f.secret ? "password" : "text"}
+                  autoComplete="off"
+                  placeholder={masked[f.key] || "غير مضبوط"}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [f.key]: e.target.value }))
+                  }
+                />
+              )}
               <p className="text-xs text-muted-foreground">{f.hint}</p>
             </div>
           ))

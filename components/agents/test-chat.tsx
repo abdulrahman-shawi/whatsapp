@@ -1,22 +1,41 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type TestMessage = { role: "user" | "assistant"; content: string };
 
-// صندوق تجربة حي: يرسل حالة النموذج الحالية دون حفظ أي شيء
+type ChatResponse = {
+  reply: string;
+  fallback?: boolean;
+  previewOnly?: boolean;
+  toolCalls?: { name: string; argumentsJson: string }[];
+  executedTools?: { name: string; result: string }[];
+};
+
+// صندوق تجربة حي: يرسل حالة الاستوديو الحالية دون حفظها.
+// لوكيل محفوظ (agentId) يُبنى البرومبت من قاعدة البيانات وتعمل المهارات بأدواتها؛
+// وإلا تُرسل حالة المسودة (تعليمات + مهارات + معرفة) مباشرة.
 export function TestChat({
+  agentId,
   systemPrompt,
+  instructions,
+  skills,
   knowledge,
 }: {
+  agentId?: string;
   systemPrompt: string;
+  instructions?: { id: string; title: string; content: string }[];
+  skills?: string[];
   knowledge: string[];
 }) {
   const [messages, setMessages] = useState<TestMessage[]>([]);
+  const [extras, setExtras] = useState<
+    Record<number, { executedTools?: { name: string; result: string }[]; previewOnly?: boolean }>
+  >({});
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -33,15 +52,24 @@ export function TestChat({
       const res = await fetch("/api/agents/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemPrompt,
-          knowledge,
-          messages: next,
-        }),
+        body: JSON.stringify(
+          agentId
+            ? { agentId, messages: next }
+            : { systemPrompt, instructions, skills, knowledge, messages: next }
+        ),
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as ChatResponse;
         setMessages([...next, { role: "assistant", content: data.reply }]);
+        if (data.executedTools?.length || data.previewOnly) {
+          setExtras((prev) => ({
+            ...prev,
+            [next.length]: {
+              executedTools: data.executedTools,
+              previewOnly: data.previewOnly,
+            },
+          }));
+        }
       } else {
         setMessages([
           ...next,
@@ -59,25 +87,43 @@ export function TestChat({
   }
 
   return (
-    <div className="rounded-lg border bg-muted/30">
-      <div className="border-b px-3 py-2 text-sm font-medium">تجربة</div>
-      <div className="flex h-56 flex-col gap-2 overflow-y-auto p-3">
+    <div className="flex h-full min-h-0 flex-col rounded-lg border bg-muted/30">
+      <div className="border-b px-3 py-2 text-sm font-medium">تجربة الوكيل</div>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
         {messages.length === 0 && (
-          <p className="m-auto text-center text-xs text-muted-foreground">
-            جرّب وكيلك هنا قبل الحفظ — أرسل رسالة كأنك عميل
+          <p className="m-auto px-4 text-center text-xs text-muted-foreground">
+            جرّب وكيلك هنا كأنك عميل — تظهر الإجراءات التي ينفّذها الوكيل أسفل ردّه
           </p>
         )}
         {messages.map((m, i) => (
-          <div
-            key={i}
-            className={cn(
-              "max-w-[80%] rounded-lg px-3 py-2 text-sm",
-              m.role === "user"
-                ? "self-end rounded-bl-md bg-mint-soft text-navy"
-                : "self-start border bg-card"
+          <div key={i} className="flex flex-col gap-1">
+            <div
+              className={cn(
+                "max-w-[85%] rounded-lg px-3 py-2 text-sm",
+                m.role === "user"
+                  ? "self-end rounded-bl-md bg-mint-soft text-navy"
+                  : "self-start border bg-card"
+              )}
+            >
+              {m.content}
+            </div>
+            {extras[i] && (
+              <div className="self-start rounded-md border border-dashed px-2 py-1.5 text-[11px] text-muted-foreground">
+                {extras[i].previewOnly ? (
+                  <span>طلب الوكيل تنفيذ إجراءات — وضع المعاينة لا يُنفّذها فعلياً</span>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {extras[i].executedTools?.map((t, j) => (
+                      <li key={j} className="flex items-center gap-1">
+                        <Wrench className="h-3 w-3 shrink-0" />
+                        <span dir="ltr">{t.name}</span>
+                        <span>— {t.result}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
-          >
-            {m.content}
           </div>
         ))}
         {loading && (

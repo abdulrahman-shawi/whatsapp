@@ -12,6 +12,6 @@ describe("relativeTime", () => {
   it("returns Arabic relative time for recent activity", () => {
     const value = relativeTime(new Date(Date.now() - 5 * 60 * 1000));
     expect(value).toContain("قبل");
-    expect(value).toContain("دقيق");
+    expect(value).toContain("دقائق");
   });
 });

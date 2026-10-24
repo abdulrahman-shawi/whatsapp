@@ -11,6 +11,9 @@ import {
   type WhatsAppCreds,
 } from "@/lib/whatsapp";
 import { collectAgentKnowledge } from "@/lib/retrieval";
+import { buildAgentSystemPrompt, parseSkills } from "@/lib/agent-prompt";
+import { toolsForSkills } from "@/lib/agent-skills";
+import { runAgentTools } from "@/lib/agent-tools";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
 import { triggerWorkflows, getWorkspaceBusinessHours } from "@/lib/workflows";
@@ -496,15 +499,61 @@ async function runPipeline(
     ];
     // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
     const aiConfig = await resolveAiConfig(workspaceId);
-    const result = await generateWorkspaceReply(
+    // برومبت النظام الكامل: الأساس + أقسام التعليمات + سلوكيات المهارات
+    const systemPrompt = buildAgentSystemPrompt(agent);
+    // أدوات المهارات المفعّلة — بلا مهارات يكون النداء الاعتيادي بلا أدوات
+    const skills = parseSkills(agent.skills);
+    const tools = skills.length > 0 ? toolsForSkills(skills) : undefined;
+
+    const knowledgeAndStyle = [...knowledge, ...styleHints];
+    const conversationMessages: ChatMessage[] = [...history];
+    let result = await generateWorkspaceReply(
       workspaceId,
-      history,
-      agent.systemPrompt,
-      [...knowledge, ...styleHints],
+      conversationMessages,
+      systemPrompt,
+      knowledgeAndStyle,
       aiConfig,
-      2048
+      2048,
+      undefined,
+      tools
     );
-    reply = result.reply?.content ?? null;
+
+    // حلقة أدوات المهارات: عندما يطلب النموذج تنفيذ أدوات ننفّذها ونحقن النتائج
+    // ثم نعيد التوليد للرد النهائي — بحد أقصى تكرارين لتفادي حلقات الاستدعاء
+    for (let round = 0; result.reply?.toolCalls?.length && round < 2; round++) {
+      const toolCalls = result.reply.toolCalls;
+      const toolResults = await runAgentTools(toolCalls, {
+        workspaceId,
+        contactId: contact.id,
+        conversationId: conversation.id,
+      });
+      conversationMessages.push({
+        role: "assistant",
+        content: result.reply.content,
+        toolCalls,
+      });
+      for (const r of toolResults) {
+        const call = toolCalls.find((c) => c.id === r.toolCallId);
+        conversationMessages.push({
+          role: "tool",
+          toolCallId: r.toolCallId,
+          name: call?.name ?? "",
+          content: r.content,
+        });
+      }
+      result = await generateWorkspaceReply(
+        workspaceId,
+        conversationMessages,
+        systemPrompt,
+        knowledgeAndStyle,
+        aiConfig,
+        2048,
+        undefined,
+        tools
+      );
+    }
+
+    reply = result.reply?.content?.trim() ? result.reply.content : null;
     if (result.trialExpired) {
       console.warn(`[agent-engine] انتهت التجربة المجانية للمساحة ${workspaceId}`);
     } else if (result.quotaExceeded) {

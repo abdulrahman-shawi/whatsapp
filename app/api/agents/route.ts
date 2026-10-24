@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { parseInstructionBlocks, parseSkills } from "@/lib/agent-prompt";
 
 // تسلسل الوكيل للعميل مع عدّاداته
 function serialize(a: {
@@ -80,6 +81,9 @@ export async function POST(req: Request) {
       handoffKeywords: Array.isArray(body.handoffKeywords)
         ? body.handoffKeywords.filter((k: unknown) => typeof k === "string")
         : [],
+      // أقسام التعليمات والمهارات — تُرشَّح للعناصر الصالحة فقط
+      instructions: parseInstructionBlocks(body.instructions),
+      skills: parseSkills(body.skills),
       isActive: body.isActive !== false,
       knowledgeSources: {
         create: sources.map(

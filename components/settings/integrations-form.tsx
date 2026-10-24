@@ -59,6 +59,8 @@ export function IntegrationsForm({
   const sourceBadge = (source: IntegrationInfo["source"]) =>
     source === "db" ? (
       <Badge variant="default">من قاعدة البيانات</Badge>
+    ) : source === "platform" ? (
+      <Badge variant="secondary">من إعدادات المنصة</Badge>
     ) : source === "env" ? (
       <Badge variant="secondary">من .env</Badge>
     ) : (

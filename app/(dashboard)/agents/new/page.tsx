@@ -1,18 +1,17 @@
 import { redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/session";
-import { AgentForm } from "@/components/agents/agent-form";
+import { AgentStudio } from "@/components/agents/agent-studio";
 
 export const dynamic = "force-dynamic";
 
-// إنشاء وكيل جديد
+// إنشاء وكيل جديد — الاستوديو بوضع المسودة (بلا معرف وكيل بعد)
 export default async function NewAgentPage() {
   const ctx = await getWorkspaceContext();
   if (!ctx) redirect("/login");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold">وكيل جديد</h1>
-      <AgentForm />
+    <div className="mx-auto max-w-6xl">
+      <AgentStudio />
     </div>
   );
 }

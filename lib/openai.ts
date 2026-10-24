@@ -1,7 +1,34 @@
 import { getIntegration } from "@/lib/settings";
 
 // توليد رد ذكي عبر أي واجهة متوافقة مع OpenAI — يعيد null عند أي فشل
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+// يدعم Tool Calling: تمرير أدوات اختيارية وقراءة طلبات استدعائها من المزود
+export type ChatMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  // لرسائل tool: معرّف الاستدعاء واسم الأداة المنفَّذة
+  toolCallId?: string;
+  name?: string;
+  // لرسائل assistant التي طلبت أدوات — تُمرَّر للمزود كـ tool_calls
+  toolCalls?: ToolCall[];
+};
+
+// طلب استدعاء أداة كما يقرأ من استجابة المزود
+export type ToolCall = {
+  id: string;
+  name: string;
+  // حج arguments كسلسلة JSON خام — تُفك لاحقاً عند التنفيذ
+  argumentsJson: string;
+};
+
+// تعريف أداة بصيغة OpenAI
+export type AiTool = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
 
 // المزوّدون الجاهزون — كلهم يعرضون واجهة /chat/completions المتوافقة مع OpenAI
 // "custom" يعتمد كلياً على AI_BASE_URL وAI_MODEL من الإعدادات
@@ -13,7 +40,7 @@ export const AI_PROVIDERS = {
   },
   kimi: { baseUrl: "https://api.moonshot.ai/v1", model: "kimi-k2-0711-preview" },
   openrouter: {
-    baseUrl: "https://openrouter.ai/api/v1",
+    baseUrl: "https://api.openrouter.ai/api/v1",
     model: "anthropic/claude-3.5-sonnet",
   },
   custom: { baseUrl: "", model: "" },
@@ -44,19 +71,21 @@ export async function resolveAiConfig(workspaceId: string): Promise<AiConfig> {
   };
 }
 
-// نتيجة توليد الرد مع استهلاك التوكنات الفعلي كما يبلّغ عنه المزوّد
+// نتيجة توليد الرد مع استهلاك التوكنات الفعلي كما يبلّغ عنه المزود
+// toolCalls تُملأ عندما يطلب النموذج تنفيذ أدوات بدل الرد النهائي مباشرة
 export type AiReply = {
   content: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  toolCalls?: ToolCall[];
 };
 
-// تقدير تقريبي للتوكنات عندما لا يُبلّغ المزوّد عن الاستهلاك
+// تقدير تقريبي للتوكنات عندما لا يُبلّغ المزود عن الاستهلاك
 // (قاعدة إبهام: توكن واحد ≈ ٤ أحرف إنجليزية؛ العربية أقل كثافة فنستخدم ٢.٥ حرف/توكن)
 function estimateTokens(text: string): number {
   return Math.max(Math.ceil(text.length / 2.5), 1);
 }
 
-// تفاصيل فشل الطلب كما يردها المزوّد — تُملأ عند الحاجة للتشخيص
+// تفاصيل فشل الطلب كما يردها المزود — تُملأ عند الحاجة للتشخيص
 export type AiErrorInfo = { status?: number; body?: string };
 
 // المفتاح والرابط والنموذج تُمرَّر من المتصل (من إعدادات مساحة العمل أو .env)
@@ -66,7 +95,8 @@ export async function generateReply(
   knowledge: string[],
   config: AiConfig,
   maxTokens = 300,
-  errorInfo?: AiErrorInfo
+  errorInfo?: AiErrorInfo,
+  options?: { tools?: AiTool[] }
 ): Promise<AiReply | null> {
   if (!config.apiKey || !config.baseUrl || !config.model) return null;
 
@@ -80,6 +110,55 @@ export async function generateReply(
     .filter(Boolean)
     .join("\n\n");
 
+  const tools = options?.tools?.length ? options.tools : undefined;
+
+  // عند تمرير أدوات نحتاج كائن أخطاء داخلي لنعرف إن كان الرفض بسببها (400)
+  if (tools) {
+    const err = errorInfo ?? {};
+    const result = await requestCompletion(messages, system, config, maxTokens, err, tools);
+    // تراجع آمن: إن رفض المزود الأدوات (400) نعيد المحاولة مرة واحدة بلا أدوات
+    if (!result && err.status === 400) {
+      console.warn("[ai] المزوّد لا يدعم الأدوات — إعادة المحاولة بلا tools");
+      return requestCompletion(messages, system, config, maxTokens, errorInfo, undefined);
+    }
+    return result;
+  }
+
+  return requestCompletion(messages, system, config, maxTokens, errorInfo, undefined);
+}
+
+// تحويل رسائلنا الداخلية إلى الصيغة التي يتوقعها المزود
+function serializeMessage(m: ChatMessage): Record<string, unknown> {
+  if (m.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: m.toolCallId,
+      name: m.name,
+      content: m.content,
+    };
+  }
+  if (m.role === "assistant" && m.toolCalls?.length) {
+    return {
+      role: "assistant",
+      content: m.content,
+      tool_calls: m.toolCalls.map((c) => ({
+        id: c.id,
+        type: "function",
+        function: { name: c.name, arguments: c.argumentsJson },
+      })),
+    };
+  }
+  return { role: m.role, content: m.content };
+}
+
+async function requestCompletion(
+  messages: ChatMessage[],
+  system: string,
+  config: AiConfig,
+  maxTokens: number,
+  errorInfo: AiErrorInfo | undefined,
+  tools: AiTool[] | undefined
+): Promise<AiReply | null> {
   try {
     const res = await fetch(
       `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`,
@@ -91,8 +170,9 @@ export async function generateReply(
         },
         body: JSON.stringify({
           model: config.model,
-          messages: [{ role: "system", content: system }, ...messages],
+          messages: [{ role: "system", content: system }, ...messages.map(serializeMessage)],
           max_tokens: maxTokens,
+          ...(tools ? { tools, tool_choice: "auto" } : {}),
         }),
       }
     );
@@ -109,8 +189,29 @@ export async function generateReply(
     }
 
     const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) return null;
+    const message = data?.choices?.[0]?.message;
+    const rawContent = message?.content;
+    const content =
+      typeof rawContent === "string" ? rawContent.trim() : rawContent == null ? "" : String(rawContent).trim();
+
+    const toolCalls: ToolCall[] = Array.isArray(message?.tool_calls)
+      ? message.tool_calls
+          .filter(
+            (c: unknown): c is { id: string; function: { name: string; arguments: string } } =>
+              Boolean(c) &&
+              typeof (c as { id?: unknown }).id === "string" &&
+              typeof (c as { function?: { name?: unknown; arguments?: unknown } }).function
+                ?.name === "string"
+          )
+          .map((c: { id: string; function: { name: string; arguments: string } }) => ({
+            id: c.id,
+            name: c.function.name,
+            argumentsJson:
+              typeof c.function.arguments === "string" ? c.function.arguments : "",
+          }))
+      : [];
+
+    if (!content && toolCalls.length === 0) return null;
 
     // الاستهلاك الفعلي من حقل usage — عند غيابه نقدّره من الطول النصي
     const reported = data?.usage as
@@ -120,14 +221,15 @@ export async function generateReply(
       system.length + messages.reduce((sum, m) => sum + m.content.length, 0);
     const promptTokens = reported?.prompt_tokens ?? estimateTokens("x".repeat(promptEstimate));
     const completionTokens =
-      reported?.completion_tokens ?? estimateTokens(content);
+      reported?.completion_tokens ?? estimateTokens(content || toolCalls.map((c) => c.argumentsJson).join(" "));
     return {
-      content: content.trim(),
+      content,
       usage: {
         promptTokens,
         completionTokens,
         totalTokens: reported?.total_tokens ?? promptTokens + completionTokens,
       },
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     };
   } catch (e) {
     if (errorInfo) errorInfo.body = e instanceof Error ? e.message : String(e);

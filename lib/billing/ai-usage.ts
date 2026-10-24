@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { generateReply, type AiReply, type AiConfig, type AiErrorInfo, type ChatMessage } from "@/lib/openai";
+import { generateReply, type AiReply, type AiConfig, type AiErrorInfo, type AiTool, type ChatMessage } from "@/lib/openai";
 import { getWorkspacePlan, getWorkspaceTrialStatus } from "@/lib/billing/plans";
 
 function currentMonth(): string {
@@ -35,7 +35,8 @@ export async function generateWorkspaceReply(
   knowledge: string[],
   config: AiConfig,
   maxTokens = 300,
-  errorInfo?: AiErrorInfo
+  errorInfo?: AiErrorInfo,
+  tools?: AiTool[]
 ): Promise<WorkspaceAiResult> {
   const trial = await getWorkspaceTrialStatus(workspaceId);
   if (trial.expired) {
@@ -85,7 +86,7 @@ export async function generateWorkspaceReply(
 
   let reply: AiReply | null = null;
   try {
-    reply = await generateReply(messages, systemPrompt, knowledge, config, maxTokens, errorInfo);
+    reply = await generateReply(messages, systemPrompt, knowledge, config, maxTokens, errorInfo, { tools });
     return { reply, quotaExceeded: false, trialExpired: false };
   } finally {
     const actualTokens = Math.min(reply?.usage.totalTokens ?? 0, reservation);

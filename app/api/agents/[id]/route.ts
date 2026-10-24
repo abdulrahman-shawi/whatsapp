@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { parseInstructionBlocks, parseSkills } from "@/lib/agent-prompt";
 
 type Params = { params: { id: string } };
 
@@ -82,6 +84,18 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     data.handoffKeywords = body.handoffKeywords;
   }
+  if (body.instructions !== undefined) {
+    if (!Array.isArray(body.instructions)) {
+      return NextResponse.json({ error: "أقسام التعليمات غير صالحة" }, { status: 400 });
+    }
+    data.instructions = parseInstructionBlocks(body.instructions);
+  }
+  if (body.skills !== undefined) {
+    if (!Array.isArray(body.skills)) {
+      return NextResponse.json({ error: "المهارات غير صالحة" }, { status: 400 });
+    }
+    data.skills = parseSkills(body.skills);
+  }
   if (body.isActive !== undefined) {
     if (typeof body.isActive !== "boolean") {
       return NextResponse.json({ error: "قيمة التفعيل غير صالحة" }, { status: 400 });
@@ -115,6 +129,8 @@ export async function PATCH(req: Request, { params }: Params) {
       responseDelaySec: agent.responseDelaySec,
       voiceReplies: agent.voiceReplies,
       handoffKeywords: agent.handoffKeywords,
+      instructions: agent.instructions as Prisma.InputJsonValue,
+      skills: agent.skills as Prisma.InputJsonValue,
       knowledge,
       createdById: ctx.userId,
     },

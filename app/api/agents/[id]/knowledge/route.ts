@@ -4,6 +4,7 @@ import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { runKnowledgeQuery, validateDbQuery } from "@/lib/db-knowledge";
+import { crawlWebsite, formatKnowledge, normalizeUrl } from "@/lib/web-knowledge";
 
 type Params = { params: { id: string } };
 
@@ -131,8 +132,7 @@ export async function POST(req: Request, { params }: Params) {
   const body = await req.json().catch(() => null);
 
   // مصدر قاعدة بيانات خارجية (MySQL/Postgres)
-  if (body?.type === "DB") {
-    const fields = validateDbSource(body);
+  if (body?.type === "DB") {    const fields = validateDbSource(body);
     if ("error" in fields) {
       return NextResponse.json({ error: fields.error }, { status: 400 });
     }
@@ -175,6 +175,50 @@ export async function POST(req: Request, { params }: Params) {
     // لا نعيد كلمات المرور للعميل أبداً
     const { dbPassword: _omit, ...safeSource } = source;
     return NextResponse.json({ source: safeSource }, { status: 201 });
+  }
+
+  // مصدر موقع: نزحف الصفحة وروابط نفس النطاق ونخزن النص المستخرج
+  if (body?.type === "WEBSITE") {
+    const rawUrl = typeof body.url === "string" ? body.url : "";
+    const url = normalizeUrl(rawUrl);
+    if (!url) {
+      return NextResponse.json(
+        { error: "الرابط غير صالح — يجب أن يبدأ بـ http:// أو https:// ومن نطاق عام" },
+        { status: 400 }
+      );
+    }
+
+    const crawled = await crawlWebsite(url.toString());
+    if (!crawled.ok) {
+      return NextResponse.json({ error: crawled.error }, { status: 400 });
+    }
+    const content = formatKnowledge(crawled.pages);
+    const preview = content.slice(0, 500);
+
+    // وضع المعاينة: نعيد ملخص الزحف دون حفظ
+    if (body.test === true) {
+      return NextResponse.json({
+        ok: true,
+        pages: crawled.pages.length,
+        chars: crawled.chars,
+        preview,
+      });
+    }
+
+    const source = await prisma.knowledgeSource.create({
+      data: {
+        agentId: params.id,
+        type: "WEBSITE",
+        title: url.hostname,
+        content,
+        url: url.toString(),
+        lastSyncedAt: new Date(),
+      },
+    });
+    return NextResponse.json(
+      { source, pages: crawled.pages.length, chars: crawled.chars, preview },
+      { status: 201 }
+    );
   }
 
   if (

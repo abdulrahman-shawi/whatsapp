@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Download,
+  Play,
   Pencil,
   Plus,
   Trash2,
@@ -75,6 +76,22 @@ function triggerSummary(w: WorkflowRow): string {
   if (w.trigger === "NO_REPLY") {
     return `بعد ${tc.hours ?? 24} ساعة صمت`;
   }
+  if (w.trigger === "CONTACT_FIELD_UPDATED") {
+    const labels: Record<string, string> = {
+      name: "الاسم",
+      email: "البريد الإلكتروني",
+      notes: "الملاحظات",
+    };
+    return `حقل ${labels[String(tc.field)] ?? "جهة الاتصال"}`;
+  }
+  if (w.trigger === "CONTACT_TAG_UPDATED" && typeof tc.tag === "string") {
+    return `الوسم: ${tc.tag}`;
+  }
+  if (w.trigger === "CONVERSATION_STARTED") return "محادثة جديدة";
+  if (w.trigger === "CONVERSATION_ENDED") return "إغلاق المحادثة";
+  if (w.trigger === "SHORTCUT") return "تشغيل يدوي";
+  if (w.trigger === "INCOMING_WEBHOOK") return "Webhook وارد";
+  if (w.trigger === "CLICK_TO_CHAT_AD") return "إعلان نقر للدردشة";
   return "";
 }
 
@@ -100,6 +117,24 @@ export function WorkflowsClient({ workflows }: Props) {
     setBusyId(w.id);
     await fetch(`/api/workflows/${w.id}`, { method: "DELETE" });
     setBusyId(null);
+    router.refresh();
+  }
+
+  async function runShortcut(w: WorkflowRow) {
+    const phone = window.prompt("أدخل رقم هاتف جهة الاتصال التي لديها محادثة مفتوحة:");
+    if (!phone?.trim()) return;
+    setBusyId(w.id);
+    const res = await fetch(`/api/workflows/${w.id}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    });
+    const data = await res.json().catch(() => null);
+    setBusyId(null);
+    if (!res.ok) {
+      window.alert(data?.error ?? "تعذّر تشغيل الاختصار");
+      return;
+    }
     router.refresh();
   }
 
@@ -205,6 +240,17 @@ export function WorkflowsClient({ workflows }: Props) {
                     </td>
                     <td className="py-3">
                       <div className="flex items-center gap-1">
+                        {w.trigger === "SHORTCUT" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="تشغيل الاختصار"
+                            disabled={!w.isActive || busyId === w.id}
+                            onClick={() => runShortcut(w)}
+                          >
+                            <Play className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"

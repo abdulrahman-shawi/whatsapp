@@ -16,7 +16,11 @@ import { toolsForSkills } from "@/lib/agent-skills";
 import { runAgentTools } from "@/lib/agent-tools";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getUsageStatus } from "@/lib/billing/plans";
-import { triggerWorkflows, getWorkspaceBusinessHours } from "@/lib/workflows";
+import {
+  triggerWorkflows,
+  getWorkspaceBusinessHours,
+  type WorkflowContext,
+} from "@/lib/workflows";
 import { getIntegration } from "@/lib/settings";
 import {
   detectConversationTopic,
@@ -136,6 +140,14 @@ type PipelineOptions = {
   text: string;
   platform: "WHATSAPP" | "WIDGET";
   conversationId?: string;
+  referral?: {
+    sourceType?: string;
+    sourceUrl?: string;
+    sourceId?: string;
+    headline?: string;
+    body?: string;
+    clickId?: string;
+  };
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
   sendReply: (to: string, body: string) => Promise<unknown>;
   sendVoiceReply?: (
@@ -212,6 +224,7 @@ async function runPipeline(
     : await prisma.conversation.findFirst({
         where: { contactId: contact.id, platform, isArchived: false },
       });
+  const isNewConversation = !conversation;
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: {
@@ -324,19 +337,45 @@ async function runPipeline(
 
   // ٥.ب مطابقة سير العمل: كلمات مفتاحية / أرقام محددة / عميل جديد
   // ننتظر اكتمالها — قد تغيّر حالة المحادثة (إيقاف الرد الآلي/إغلاق/إسناد)
-  const workflowCtx = {
+  const workflowCtx: WorkflowContext = {
     workspaceId,
     contactId: contact.id,
     waPhone,
     contactName,
     text,
     conversationId: conversation.id,
-    vars: {},
+    vars: opts.referral
+      ? {
+          ad_source_url: opts.referral.sourceUrl ?? "",
+          ad_source_id: opts.referral.sourceId ?? "",
+          ad_headline: opts.referral.headline ?? "",
+          ad_body: opts.referral.body ?? "",
+          ctwa_clid: opts.referral.clickId ?? "",
+        }
+      : {},
   };
+  if (isNewConversation) {
+    await triggerWorkflows(workspaceId, "CONVERSATION_STARTED", {}, workflowCtx).catch((e) =>
+      console.error("[agent-engine] فشل تشغيل محفّز بدء المحادثة:", e)
+    );
+  }
+  if (existingContact && !existingContact.name && contact.name) {
+    await triggerWorkflows(
+      workspaceId,
+      "CONTACT_FIELD_UPDATED",
+      { field: "name" },
+      { ...workflowCtx, vars: { field: "name", value: contact.name } }
+    ).catch((e) => console.error("[agent-engine] فشل تشغيل محفّز تحديث الاسم:", e));
+  }
   await triggerWorkflows(workspaceId, "KEYWORD", {}, workflowCtx).catch(() => {});
   await triggerWorkflows(workspaceId, "FROM_NUMBERS", {}, workflowCtx).catch(() => {});
   if (isNewContact) {
     await triggerWorkflows(workspaceId, "NEW_CONTACT", {}, workflowCtx).catch(() => {});
+  }
+  if (opts.referral?.sourceType === "ad" || opts.referral?.clickId) {
+    await triggerWorkflows(workspaceId, "CLICK_TO_CHAT_AD", {}, workflowCtx).catch((e) =>
+      console.error("[agent-engine] فشل تشغيل محفّز إعلان النقر للدردشة:", e)
+    );
   }
 
   // ٦. كلمات التسليم: تحويل المحادثة لموظف دون رد آلي
@@ -628,6 +667,7 @@ async function storeInboundWithoutAgent(input: {
     where: { workspaceId, waPhone: input.waPhone },
     select: { name: true },
   });
+  const isNewContact = !existingForName;
   const contact = await prisma.contact.upsert({
     where: {
       workspaceId_waPhone: { workspaceId, waPhone: input.waPhone },
@@ -646,6 +686,7 @@ async function storeInboundWithoutAgent(input: {
   let conversation = await prisma.conversation.findFirst({
     where: { contactId: contact.id, platform: "WHATSAPP", isArchived: false },
   });
+  const isNewConversation = !conversation;
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: {
@@ -701,6 +742,32 @@ async function storeInboundWithoutAgent(input: {
   }
   await incrementUsage(workspaceId);
 
+  const workflowContext: WorkflowContext = {
+    workspaceId,
+    contactId: contact.id,
+    waPhone: input.waPhone,
+    contactName: contact.name,
+    text: input.text,
+    conversationId: conversation.id,
+    stage: contact.stage,
+    tags: contact.tags,
+    vars: {},
+  };
+  if (isNewConversation) {
+    await triggerWorkflows(workspaceId, "CONVERSATION_STARTED", {}, workflowContext);
+  }
+  if (existingForName && !existingForName.name && contact.name) {
+    await triggerWorkflows(
+      workspaceId,
+      "CONTACT_FIELD_UPDATED",
+      { field: "name" },
+      { ...workflowContext, vars: { field: "name", value: contact.name } }
+    );
+  }
+  if (isNewContact) {
+    await triggerWorkflows(workspaceId, "NEW_CONTACT", {}, workflowContext);
+  }
+
   triggerNewMessage(workspaceId, conversation.id, msg);
   triggerConversationUpdated(workspaceId, conversation.id);
 }
@@ -713,6 +780,7 @@ export async function handleIncomingWhatsAppMessage(input: {
   // مساحة العمل المحلولة من معرّف رقم الهاتف — غائبة في الاحتياط القديم
   workspaceId?: string;
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
+  referral?: PipelineOptions["referral"];
 }): Promise<void> {
   try {
     // رقم محظور — نتجاهل الرسالة تماماً: لا محادثة جديدة ولا رد آلي
@@ -805,6 +873,7 @@ export async function handleIncomingWhatsAppMessage(input: {
       text,
       platform: "WHATSAPP",
       media: input.media,
+      referral: input.referral,
       sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),
       sendVoiceReply: async (to, audio) => {
         const mime = "audio/ogg; codecs=opus";

@@ -5,6 +5,7 @@ import { triggerConversationUpdated } from "@/lib/pusher";
 import { logAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
+import { triggerWorkflows } from "@/lib/workflows";
 
 const STATUSES = ["AI", "MANUAL", "HANDED_OFF"] as const;
 
@@ -195,6 +196,28 @@ export async function PATCH(
     fireOutboundEvent(ctx.workspaceId, "conversation.closed", {
       conversationId: params.id,
     });
+    const contact = await prisma.contact.findUnique({
+      where: { id: conversation.contactId },
+      select: { id: true, name: true, waPhone: true, stage: true, tags: true },
+    });
+    if (contact) {
+      triggerWorkflows(
+        ctx.workspaceId,
+        "CONVERSATION_ENDED",
+        {},
+        {
+          workspaceId: ctx.workspaceId,
+          contactId: contact.id,
+          waPhone: contact.waPhone,
+          contactName: contact.name,
+          text: "",
+          conversationId: conversation.id,
+          stage: contact.stage,
+          tags: contact.tags,
+          vars: {},
+        }
+      ).catch((e) => console.error("[conversations] فشل تشغيل محفّز إغلاق المحادثة:", e));
+    }
   }
   if (body.closed === false && existing.closedAt) {
     await logAudit({

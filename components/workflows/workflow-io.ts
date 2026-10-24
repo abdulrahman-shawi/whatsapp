@@ -7,14 +7,28 @@ export const WORKFLOW_TRIGGERS = [
   "NEW_CONTACT",
   "STAGE_CHANGE",
   "NO_REPLY",
+  "CONVERSATION_STARTED",
+  "CONVERSATION_ENDED",
+  "CONTACT_FIELD_UPDATED",
+  "CONTACT_TAG_UPDATED",
+  "SHORTCUT",
+  "INCOMING_WEBHOOK",
+  "CLICK_TO_CHAT_AD",
 ] as const;
 
 export const triggerLabels: Record<string, string> = {
   KEYWORD: "رسالة بكلمة مفتاحية",
   FROM_NUMBERS: "رسالة من أرقام محددة",
   NEW_CONTACT: "عميل جديد",
-  STAGE_CHANGE: "تغيير حالة العميل",
+  STAGE_CHANGE: "تحديث حالة العميل",
   NO_REPLY: "لا رد من العميل",
+  CONVERSATION_STARTED: "بدء المحادثة",
+  CONVERSATION_ENDED: "انتهاء المحادثة",
+  CONTACT_FIELD_UPDATED: "تحديث حقل جهة الاتصال",
+  CONTACT_TAG_UPDATED: "تحديث وسم جهة الاتصال",
+  SHORTCUT: "اختصار يدوي",
+  INCOMING_WEBHOOK: "Webhook وارد",
+  CLICK_TO_CHAT_AD: "إعلانات النقر للدردشة",
 };
 
 export const WORKFLOW_STEP_LABELS: Record<string, string> = {
@@ -189,6 +203,17 @@ function validateTriggerConfig(
       config.hours = Math.round(hours);
     }
   }
+  if (trigger === "CONTACT_FIELD_UPDATED") {
+    if (!["name", "email", "notes"].includes(String(src.field))) {
+      errors.push("محفّز تحديث الحقل: اختر الاسم أو البريد الإلكتروني أو الملاحظات");
+    } else {
+      config.field = src.field;
+    }
+  }
+  if (trigger === "CONTACT_TAG_UPDATED" && typeof src.tag === "string" && src.tag.trim()) {
+    config.tag = src.tag.trim();
+  }
+  if (src.oncePerContact === true) config.oncePerContact = true;
   return config;
 }
 

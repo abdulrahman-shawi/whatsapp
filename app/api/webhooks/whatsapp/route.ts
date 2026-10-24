@@ -21,6 +21,14 @@ interface MetaMessage {
   document?: MetaMedia;
   audio?: MetaMedia;
   video?: MetaMedia;
+  referral?: {
+    source_type?: string;
+    source_url?: string;
+    source_id?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+  };
 }
 interface MetaValue {
   metadata?: { phone_number_id?: string };
@@ -143,6 +151,16 @@ export async function POST(req: Request) {
                   mediaId: media.id,
                   mediaMime: media.mime_type ?? null,
                   mediaType: mediaType ?? null,
+                }
+              : undefined,
+            referral: msg.referral
+              ? {
+                sourceType: msg.referral.source_type,
+                sourceUrl: msg.referral.source_url,
+                  sourceId: msg.referral.source_id,
+                  headline: msg.referral.headline,
+                  body: msg.referral.body,
+                  clickId: msg.referral.ctwa_clid,
                 }
               : undefined,
           })

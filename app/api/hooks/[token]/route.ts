@@ -5,7 +5,13 @@ import { handleIncomingWhatsAppMessage } from "@/lib/agent-engine";
 import { triggerWorkflows, type TriggerConfig } from "@/lib/workflows";
 
 // محفزات يمكن إطلاقها مباشرة عبر triggerWorkflows — NO_REPLY يفحصه الكرون فقط
-const DIRECT_TRIGGERS = ["KEYWORD", "FROM_NUMBERS", "NEW_CONTACT", "STAGE_CHANGE"] as const;
+const DIRECT_TRIGGERS = [
+  "KEYWORD",
+  "FROM_NUMBERS",
+  "NEW_CONTACT",
+  "STAGE_CHANGE",
+  "INCOMING_WEBHOOK",
+] as const;
 type DirectTrigger = (typeof DIRECT_TRIGGERS)[number];
 
 // المستقبل العام: POST /api/hooks/<token> — بلا مصادقة، الرمز نفسه هو المفتاح
@@ -87,9 +93,40 @@ export async function POST(
         }
       }
       if (changed) {
-        await prisma.contact
-          .update({ where: { id: contact.id }, data: { tags: merged } })
-          .catch(() => {});
+        await prisma.contact.update({
+          where: { id: contact.id },
+          data: { tags: merged },
+        });
+        const changedTags = [webhook.autoTag, bodyTag]
+          .map((tag) => tag.trim())
+          .filter((tag) => tag && !contact.tags.includes(tag));
+        const conversation = await prisma.conversation.findFirst({
+          where: {
+            contactId: contact.id,
+            platform: "WHATSAPP",
+            isArchived: false,
+          },
+          orderBy: { lastMessageAt: "desc" },
+          select: { id: true },
+        });
+        for (const tag of changedTags) {
+          triggerWorkflows(
+            webhook.workspaceId,
+            "CONTACT_TAG_UPDATED",
+            { changedTag: tag },
+            {
+              workspaceId: webhook.workspaceId,
+              contactId: contact.id,
+              waPhone: phone,
+              contactName,
+              text,
+              conversationId: conversation?.id,
+              vars: { tag },
+            }
+          ).catch((e) =>
+            console.error(`[hooks] فشل تشغيل محفّز تحديث الوسم "${tag}":`, e)
+          );
+        }
       }
 
       // ب) تشغيل سير العمل المرتبط — بمحفزه الخاص وإعداداته المخزنة

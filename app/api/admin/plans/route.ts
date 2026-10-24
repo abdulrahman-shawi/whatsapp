@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getWorkspaceContext } from "@/lib/session";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensurePlansSeeded } from "@/lib/billing/plans";
 
@@ -11,28 +12,28 @@ function adminEmails(): string[] {
     .filter(Boolean);
 }
 
-// التحقق أن المستخدم الحالي مدير المنصة
-async function isPlatformAdmin(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { email: true },
-  });
-  return !!user && adminEmails().includes(user.email.toLowerCase());
-}
-
 // تعيين باقة لمساحة عمل — التفعيل اليدوي من مالك المنصة
 // عند إضافة Stripe لاحقاً سيصبح هذا المسار هو ما يستدعيه webhook
 export async function POST(req: Request) {
-  const ctx = await getWorkspaceContext();
-  if (!ctx) return NextResponse.json({ error: "غير مصرّح" }, { status: 401 });
-  if (!(await isPlatformAdmin(ctx.userId))) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email || !adminEmails().includes(session.user.email.toLowerCase())) {
     return NextResponse.json({ error: "مدير المنصة فقط" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
-  const planCode = body?.planCode?.trim();
-  if (!planCode) {
-    return NextResponse.json({ error: "رمز الباقة مطلوب" }, { status: 400 });
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "طلب غير صالح" }, { status: 400 });
+  }
+
+  const payload = body as Record<string, unknown>;
+  const planCode = typeof payload.planCode === "string" ? payload.planCode.trim() : "";
+  const workspaceId =
+    typeof payload.workspaceId === "string" ? payload.workspaceId.trim() : "";
+  if (!planCode || !workspaceId) {
+    return NextResponse.json(
+      { error: "رمز الباقة ومساحة العمل مطلوبان" },
+      { status: 400 }
+    );
   }
 
   await ensurePlansSeeded();
@@ -41,8 +42,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "باقة غير معروفة" }, { status: 400 });
   }
 
-  // بلا workspaceId: تعيين لمساحة عمل المدير الحالية
-  const workspaceId = body?.workspaceId ?? ctx.workspaceId;
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: { id: true },

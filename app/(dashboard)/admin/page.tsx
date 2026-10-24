@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { CreditCard, Users, Wallet } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensurePlansSeeded } from "@/lib/billing/plans";
 import {
   Card,
   CardContent,
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AdminConfigForm } from "@/components/admin/admin-config-form";
+import { WorkspacePlanControl } from "@/components/admin/workspace-plan-control";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +30,8 @@ export default async function AdminPage() {
   if (!session?.user?.email || !adminEmails().includes(session.user.email.toLowerCase())) {
     redirect("/inbox");
   }
+
+  await ensurePlansSeeded();
 
   const [workspaces, paidInvoices, plans] = await Promise.all([
     prisma.workspace.findMany({
@@ -51,7 +55,7 @@ export default async function AdminPage() {
       },
     }),
     prisma.invoice.findMany({ where: { status: "PAID" } }),
-    prisma.plan.findMany(),
+    prisma.plan.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
 
   const stripeActive = workspaces.filter((w) => w.settings.length > 0);
@@ -107,7 +111,8 @@ export default async function AdminPage() {
           <CardTitle className="text-lg">المساحات والاشتراكات</CardTitle>
           <CardDescription>
             آخر {workspaces.length} مساحة عمل — الاشتراك النشط يعني وجود اشتراك
-            Stripe ساري، واليدوي يعني تفعيلاً من مالك المنصة
+            Stripe ساري، واليدوي يعني تفعيلاً من مالك المنصة. تغيير الباقة هنا لا
+            يغيّر اشتراك Stripe نفسه.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -133,7 +138,17 @@ export default async function AdminPage() {
                     <td className="py-2 text-muted-foreground" dir="ltr">
                       {w.members[0]?.user.email ?? "—"}
                     </td>
-                    <td className="py-2">{w.plan?.name ?? "الافتراضية"}</td>
+                    <td className="py-2">
+                      <WorkspacePlanControl
+                        workspaceId={w.id}
+                        currentPlanCode={w.plan?.code ?? ""}
+                        plans={plans.map((plan) => ({
+                          code: plan.code,
+                          name: plan.name,
+                          priceMonthly: plan.priceMonthly,
+                        }))}
+                      />
+                    </td>
                     <td className="py-2">
                       {active ? (
                         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">

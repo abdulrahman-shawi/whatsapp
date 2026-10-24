@@ -299,6 +299,7 @@ model Contact {
   workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   stageHistory  ContactStageHistory[]
   conversations Conversation[]
+  workflowActivations WorkflowContactActivation[]
 
   @@unique([workspaceId, waPhone])
 }
@@ -443,6 +444,18 @@ model Workflow {
   createdBy     User?           @relation(fields: [createdById], references: [id])
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs          WorkflowRun[]
+  contactActivations WorkflowContactActivation[]
+}
+
+model WorkflowContactActivation {
+  workflowId String
+  contactId  String
+  createdAt  DateTime @default(now())
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([workflowId, contactId])
+  @@index([contactId])
 }
 
 model WorkflowRun {

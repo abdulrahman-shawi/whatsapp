@@ -89,6 +89,7 @@ export async function BillingSection({
       )}
 
       <BillingClient
+        workspaceId={workspaceId}
         currentPlan={currentPlan}
         plans={plans}
         usage={usage}

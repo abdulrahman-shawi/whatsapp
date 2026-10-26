@@ -2,6 +2,7 @@ import { Prisma, type ContactStage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { notifyMembers } from "@/lib/notify";
 import type { ToolCall } from "@/lib/openai";
+import { triggerWorkflows } from "@/lib/workflows";
 
 // تنفيذ أدوات مهارات الوكيل على قاعدة البيانات:
 // كل أداة تتحقق أن جهة الاتصال/المحادثة تتبع مساحة عمل المستخدم،
@@ -77,7 +78,43 @@ async function updateContact(
 
   if (Object.keys(data).length === 0) return "لا شيء لتحديثه";
 
-  await prisma.contact.update({ where: { id: contact.id }, data });
+  const updatedContact = await prisma.contact.update({ where: { id: contact.id }, data });
+  const workflowContext = {
+    workspaceId: ctx.workspaceId,
+    contactId: contact.id,
+    waPhone: updatedContact.waPhone,
+    contactName: updatedContact.name,
+    text: "",
+    conversationId: ctx.conversationId,
+    stage: updatedContact.stage,
+    tags: updatedContact.tags,
+    vars: {},
+  };
+  for (const [field, value, previous] of [
+    ["name", updatedContact.name, contact.name],
+    ["email", updatedContact.email, contact.email],
+  ] as const) {
+    if (value !== previous) {
+      void triggerWorkflows(
+        ctx.workspaceId,
+        "CONTACT_FIELD_UPDATED",
+        { field },
+        { ...workflowContext, vars: { field, value: value ?? "" } }
+      ).catch((error) =>
+        console.error(`[agent-tools] فشل تشغيل محفّز تحديث الحقل "${field}":`, error)
+      );
+    }
+  }
+  for (const tag of updatedContact.tags.filter((item) => !contact.tags.includes(item))) {
+    void triggerWorkflows(
+      ctx.workspaceId,
+      "CONTACT_TAG_UPDATED",
+      { changedTag: tag },
+      { ...workflowContext, vars: { tag } }
+    ).catch((error) =>
+      console.error(`[agent-tools] فشل تشغيل محفّز تحديث الوسم "${tag}":`, error)
+    );
+  }
   const changed = [
     name ? "الاسم" : null,
     email ? "البريد" : null,
@@ -104,6 +141,24 @@ async function updateContactStage(
   await prisma.contactStageHistory.create({
     data: { contactId: contact.id, stage: stageValue, source: "ai" },
   });
+  if (contact.stage !== stageValue) {
+    void triggerWorkflows(
+      ctx.workspaceId,
+      "STAGE_CHANGE",
+      { fromStage: contact.stage, toStage: stageValue },
+      {
+        workspaceId: ctx.workspaceId,
+        contactId: contact.id,
+        waPhone: contact.waPhone,
+        contactName: contact.name,
+        text: "",
+        conversationId: ctx.conversationId,
+        vars: {},
+      }
+    ).catch((error) =>
+      console.error("[agent-tools] فشل تشغيل محفّز تحديث المرحلة:", error)
+    );
+  }
   return `تم تحديث مرحلة العميل إلى: ${STAGE_LABELS[stage]}`;
 }
 
@@ -122,6 +177,24 @@ async function addNote(
   // نحتفظ بأحدث الملاحظات عند تجاوز الحد
   const notes = combined.length > 5000 ? combined.slice(combined.length - 5000) : combined;
   await prisma.contact.update({ where: { id: contact.id }, data: { notes } });
+  if (contact.notes !== notes) {
+    void triggerWorkflows(
+      ctx.workspaceId,
+      "CONTACT_FIELD_UPDATED",
+      { field: "notes" },
+      {
+        workspaceId: ctx.workspaceId,
+        contactId: contact.id,
+        waPhone: contact.waPhone,
+        contactName: contact.name,
+        text: "",
+        conversationId: ctx.conversationId,
+        vars: { field: "notes", value: notes },
+      }
+    ).catch((error) =>
+      console.error("[agent-tools] فشل تشغيل محفّز تحديث الملاحظات:", error)
+    );
+  }
   return "تمت إضافة الملاحظة إلى جهة الاتصال";
 }
 
@@ -179,6 +252,29 @@ async function closeConversation(
       sendAt: new Date(Date.now() + 2 * 60 * 1000),
     },
   });
+  const contact = await prisma.contact.findUnique({
+    where: { id: conversation.contactId },
+  });
+  if (contact) {
+    void triggerWorkflows(
+      ctx.workspaceId,
+      "CONVERSATION_ENDED",
+      {},
+      {
+        workspaceId: ctx.workspaceId,
+        contactId: contact.id,
+        waPhone: contact.waPhone,
+        contactName: contact.name,
+        text: "",
+        conversationId: conversation.id,
+        stage: contact.stage,
+        tags: contact.tags,
+        vars: {},
+      }
+    ).catch((error) =>
+      console.error("[agent-tools] فشل تشغيل محفّز إغلاق المحادثة:", error)
+    );
+  }
   const summary = str(args.summary);
   return summary ? `تم إغلاق المحادثة (${summary})` : "تم إغلاق المحادثة";
 }

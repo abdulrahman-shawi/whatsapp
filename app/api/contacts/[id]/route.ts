@@ -105,6 +105,50 @@ export async function PATCH(
     ).catch(() => {});
   }
 
+  const changedFields = (["name", "email", "notes"] as const).filter(
+    (field) => data[field] !== undefined && data[field] !== existing[field]
+  );
+  const changedTags = [
+    ...existing.tags.filter((tag) => !contact.tags.includes(tag)),
+    ...contact.tags.filter((tag) => !existing.tags.includes(tag)),
+  ];
+  if (changedFields.length > 0 || changedTags.length > 0) {
+    const conversation = await prisma.conversation.findFirst({
+      where: { contactId: contact.id, isArchived: false, closedAt: null },
+      orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } },
+      select: { id: true },
+    });
+    const workflowContext = {
+      workspaceId: ctx.workspaceId,
+      contactId: contact.id,
+      waPhone: contact.waPhone,
+      contactName: contact.name,
+      text: "",
+      conversationId: conversation?.id,
+      vars: {},
+    };
+    for (const field of changedFields) {
+      triggerWorkflows(
+        ctx.workspaceId,
+        "CONTACT_FIELD_UPDATED",
+        { field },
+        { ...workflowContext, vars: { field, value: String(contact[field] ?? "") } }
+      ).catch((e) =>
+        console.error(`[contacts] فشل تشغيل محفّز تحديث الحقل "${field}":`, e)
+      );
+    }
+    for (const changedTag of changedTags) {
+      triggerWorkflows(
+        ctx.workspaceId,
+        "CONTACT_TAG_UPDATED",
+        { changedTag },
+        { ...workflowContext, vars: { tag: changedTag } }
+      ).catch((e) =>
+        console.error(`[contacts] فشل تشغيل محفّز تحديث الوسم "${changedTag}":`, e)
+      );
+    }
+  }
+
   // ويب هوك صادر: تحديث بيانات العميل
   fireOutboundEvent(ctx.workspaceId, "contact.updated", {
     id: contact.id,

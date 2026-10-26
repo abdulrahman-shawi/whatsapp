@@ -22,6 +22,7 @@ type Usage = { used: number; limit: number; remaining: number; percent: number }
 
 // صفحة الاشتراك: الباقة الحالية، شبكة الباقات، والاشتراك الآلي أو التفعيل اليدوي
 export function BillingClient({
+  workspaceId,
   currentPlan,
   plans,
   usage,
@@ -29,6 +30,7 @@ export function BillingClient({
   supportWhatsapp,
   stripeConfigured,
 }: {
+  workspaceId: string;
   currentPlan: PlanItem;
   plans: PlanItem[];
   usage: Usage;
@@ -62,7 +64,7 @@ export function BillingClient({
     const res = await fetch("/api/admin/plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ planCode: adminPlan }),
+      body: JSON.stringify({ planCode: adminPlan, workspaceId }),
     });
     setSaving(false);
     const data = await res.json().catch(() => null);

@@ -1,6 +1,3 @@
-// مخطط قاعدة البيانات الكامل للمنصة (PostgreSQL)
-// ملاحظة: بعد ضبط DATABASE_URL نفّذ: npx prisma db push
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,21 +7,530 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// أدوار الأعضاء داخل مساحة العمل
+model User {
+  id                    String                 @id @default(cuid())
+  name                  String
+  email                 String                 @unique
+  passwordHash          String
+  createdAt             DateTime               @default(now())
+  conversationAssignees ConversationAssignee[]
+  sentMessages          Message[]
+  workflows             Workflow[]
+  memberships           WorkspaceMember[]
+}
+
+model Workspace {
+  id                            String                 @id @default(cuid())
+  name                          String
+  createdAt                     DateTime               @default(now())
+  planId                        String?
+  restrictStaff                 Boolean                @default(false)
+  trialStartedAt                DateTime?
+  trialEndsAt                   DateTime?
+  subdomain                     String?                @unique
+  customDomain                  String?                @unique
+  customDomainVerificationToken String?
+  customDomainVerifiedAt        DateTime?
+  agents                        Agent[]
+  bookings                      Booking[]
+  broadcasts                    BroadcastCampaign[]
+  cannedResponses               CannedResponse[]
+  contacts                      Contact[]
+  conversations                 Conversation[]
+  dailyReports                  DailyWorkspaceReport[]
+  invoices                      Invoice[]
+  leadForms                     LeadForm[]
+  mediaAssets                   MediaAsset[]
+  scheduledMessages             ScheduledMessage[]
+  settings                      Setting[]
+  templates                     Template[]
+  usage                         UsageRecord[]
+  workflows                     Workflow[]
+  plan                          Plan?                  @relation(fields: [planId], references: [id])
+  invites                       WorkspaceInvite[]
+  members                       WorkspaceMember[]
+}
+
+model Plan {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  name         String
+  priceMonthly Int
+  messageLimit Int
+  maxMembers   Int         @default(2)
+  maxAgents    Int         @default(1)
+  sortOrder    Int         @default(0)
+  tokenLimit   Int         @default(1000000)
+  invoices     Invoice[]
+  workspaces   Workspace[]
+}
+
+model BroadcastCampaign {
+  id           String           @id @default(cuid())
+  workspaceId  String
+  tag          String
+  body         String
+  templateId   String?
+  status       BroadcastStatus  @default(SENDING)
+  totalCount   Int              @default(0)
+  sentCount    Int              @default(0)
+  failedCount  Int              @default(0)
+  createdById  String?
+  createdAt    DateTime         @default(now())
+  scheduledAt  DateTime?
+  sentAt       DateTime?
+  params       String[]         @default([])
+  audience     Json             @default("{}")
+  linkUrl      String?
+  linkUrlB     String?
+  bodyB        String?
+  sentCountB   Int              @default(0)
+  failedCountB Int              @default(0)
+  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  clicks       BroadcastClick[]
+}
+
+model BroadcastClick {
+  id         String            @id @default(cuid())
+  campaignId String
+  contactId  String
+  clickedAt  DateTime          @default(now())
+  variant    String            @default("A")
+  campaign   BroadcastCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        String
+  title       String
+  body        String
+  link        String?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, userId, createdAt])
+}
+
+model DailyWorkspaceReport {
+  id          String    @id @default(cuid())
+  workspaceId String
+  reportDate  String    @db.VarChar(10)
+  status      String    @default("PROCESSING")
+  body        String?
+  createdAt   DateTime  @default(now())
+  notifiedAt  DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, reportDate])
+  @@index([status, reportDate])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  userName    String?
+  action      String
+  entity      String
+  entityId    String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+model Invoice {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  planId          String?
+  amount          Int
+  currency        String    @default("usd")
+  status          String
+  stripeSessionId String?   @unique
+  stripeInvoiceId String?
+  createdAt       DateTime  @default(now())
+  plan            Plan?     @relation(fields: [planId], references: [id])
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model InboundWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  token       String    @unique
+  workflowId  String?
+  autoTag     String    @default("")
+  isActive    Boolean   @default(true)
+  lastHitAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  keys      Json
+  createdAt DateTime @default(now())
+}
+
+model OutboundWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String    @default("")
+  url         String
+  events      String[]  @default([])
+  secret      String?
+  isActive    Boolean   @default(true)
+  lastFiredAt DateTime?
+  lastStatus  Int?
+  createdAt   DateTime  @default(now())
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  keyHash     String    @unique
+  prefix      String
+  scopes      String[]  @default(["read"])
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model WorkspaceInvite {
+  id          String     @id @default(cuid())
+  token       String     @unique
+  workspaceId String
+  role        MemberRole @default(STAFF)
+  createdAt   DateTime   @default(now())
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceMember {
+  userId      String
+  workspaceId String
+  role        MemberRole @default(STAFF)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+}
+
+model Agent {
+  id               String            @id @default(cuid())
+  workspaceId      String
+  name             String
+  systemPrompt     String
+  welcomeMessage   String
+  responseDelaySec Int               @default(3)
+  handoffKeywords  String[]
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  offHoursReply    String?
+  voiceReplies     Boolean           @default(false)
+  instructions     Json              @default("[]")
+  skills           Json              @default("[]")
+  skillPrompts     Json              @default("{}")
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions         AgentVersion[]
+  conversations    Conversation[]
+  knowledgeSources KnowledgeSource[]
+}
+
+model AgentVersion {
+  id               String   @id @default(cuid())
+  agentId          String
+  name             String
+  systemPrompt     String
+  welcomeMessage   String
+  responseDelaySec Int
+  handoffKeywords  String[]
+  knowledge        Json     @default("[]")
+  createdById      String?
+  createdAt        DateTime @default(now())
+  voiceReplies     Boolean  @default(false)
+  instructions     Json     @default("[]")
+  skills           Json     @default("[]")
+  skillPrompts     Json     @default("{}")
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, createdAt])
+}
+
+model KnowledgeSource {
+  id           String        @id @default(cuid())
+  agentId      String
+  type         KnowledgeType
+  title        String
+  content      String
+  fileUrl      String?
+  createdAt    DateTime      @default(now())
+  dbEngine     String?
+  dbHost       String?
+  dbName       String?
+  dbPassword   String?
+  dbPort       Int?
+  dbQuery      String?
+  dbUser       String?
+  lastSyncedAt DateTime?
+  url          String?
+  agent        Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model Contact {
+  id            String                @id @default(cuid())
+  workspaceId   String
+  waPhone       String
+  name          String?
+  notes         String?
+  tags          String[]
+  createdAt     DateTime              @default(now())
+  stage         ContactStage          @default(NEW)
+  blocked       Boolean               @default(false)
+  leadScore     Int                   @default(0)
+  email         String?
+  bookings      Booking[]
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  stageHistory  ContactStageHistory[]
+  conversations Conversation[]
+  workflowActivations WorkflowContactActivation[]
+
+  @@unique([workspaceId, waPhone])
+}
+
+model ContactStageHistory {
+  id        String       @id @default(cuid())
+  contactId String
+  stage     ContactStage
+  source    String       @default("manual")
+  createdAt DateTime     @default(now())
+  contact   Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, createdAt])
+}
+
+model Conversation {
+  id                String                 @id @default(cuid())
+  workspaceId       String
+  contactId         String
+  agentId           String?
+  platform          Platform               @default(WHATSAPP)
+  status            ConversationStatus     @default(AI)
+  isArchived        Boolean                @default(false)
+  lastMessageAt     DateTime?
+  createdAt         DateTime               @default(now())
+  closedAt          DateTime?
+  followUpAt        DateTime?
+  notes             String?
+  tags              String[]               @default([])
+  sentiment         String?
+  summarizedAt      DateTime?
+  summary           String?
+  csatAskedAt       DateTime?
+  csatPending       Boolean                @default(false)
+  csatRating        Int?
+  topic             ConversationTopic?
+  isCritical        Boolean                @default(false)
+  criticalAt        DateTime?
+  agent             Agent?                 @relation(fields: [agentId], references: [id])
+  contact           Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  workspace         Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignees         ConversationAssignee[]
+  messages          Message[]
+  scheduledMessages ScheduledMessage[]
+
+  @@index([workspaceId, isCritical, lastMessageAt])
+}
+
+model ConversationAssignee {
+  conversationId String
+  userId         String
+  assignedAt     DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+}
+
+model CannedResponse {
+  id          String    @id @default(cuid())
+  workspaceId String
+  shortcut    String
+  body        String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, shortcut])
+}
+
+model ScheduledMessage {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  conversationId String
+  body           String
+  sendAt         DateTime
+  sentAt         DateTime?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  attempts       Int          @default(0)
+  lastError      String?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  direction      MessageDirection
+  body           String
+  senderType     SenderType
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  rating         String?
+  isNote         Boolean          @default(false)
+  senderId       String?
+  mediaId        String?
+  mediaMime      String?
+  mediaType      String?
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?            @relation(fields: [senderId], references: [id])
+}
+
+model UsageRecord {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  month        String
+  messagesUsed Int       @default(0)
+  messageLimit Int       @default(1000)
+  tokensUsed   Int       @default(0)
+  tokenLimit   Int       @default(1000000)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, month])
+}
+
+model Setting {
+  workspaceId String
+  key         String
+  value       String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
+}
+
+model PlatformSetting {
+  key   String @id
+  value String
+}
+
+model Workflow {
+  id            String          @id @default(cuid())
+  workspaceId   String
+  name          String
+  trigger       WorkflowTrigger
+  triggerConfig Json            @default("{}")
+  steps         Json            @default("[]")
+  isActive      Boolean         @default(true)
+  createdById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  hookToken     String?         @unique
+  createdBy     User?           @relation(fields: [createdById], references: [id])
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs          WorkflowRun[]
+  contactActivations WorkflowContactActivation[]
+}
+
+model WorkflowContactActivation {
+  workflowId String
+  contactId  String
+  createdAt  DateTime @default(now())
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([workflowId, contactId])
+  @@index([contactId])
+}
+
+model WorkflowRun {
+  id             String    @id @default(cuid())
+  workflowId     String
+  conversationId String?
+  status         String
+  pendingSteps   Json?
+  resumeAt       DateTime?
+  logs           String    @default("")
+  createdAt      DateTime  @default(now())
+  workflow       Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+model Booking {
+  id          String    @id @default(cuid())
+  workspaceId String
+  contactId   String
+  title       String
+  scheduledAt DateTime
+  notes       String?
+  createdAt   DateTime  @default(now())
+  remindedAt  DateTime?
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model MediaAsset {
+  id          String    @id @default(cuid())
+  workspaceId String
+  filename    String
+  mime        String
+  dataBase64  String
+  createdAt   DateTime  @default(now())
+  folder      String    @default("")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model LeadForm {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  title       String    @default("تواصل معنا")
+  description String?
+  fields      Json      @default("[]")
+  autoTag     String    @default("")
+  autoStage   String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  language    String    @default("ar")
+  body        String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
 enum MemberRole {
   OWNER
   STAFF
 }
 
-// نوع مصدر المعرفة للوكيل
 enum KnowledgeType {
   TEXT
   FILE
-  WEBSITE // محتوى موقع يُسحب عند الإضافة ويُخزَّن كنص — مع إمكانية إعادة المزامنة
-  DB // قاعدة بيانات خارجية (MySQL/Postgres) — يُقرأ منها عند كل رسالة
+  DB
+  WEBSITE
 }
 
-// منصة المحادثة
 enum Platform {
   WHATSAPP
   WIDGET
@@ -33,7 +539,6 @@ enum Platform {
   INSTAGRAM
 }
 
-// حالة المحادثة: رد آلي / تدخل بشري / تم تسليمها
 enum ConversationStatus {
   AI
   MANUAL
@@ -47,598 +552,49 @@ enum ConversationTopic {
   QUOTE
 }
 
-// اتجاه الرسالة
 enum MessageDirection {
   INBOUND
   OUTBOUND
 }
 
-// نوع المرسل
 enum SenderType {
   AI
   HUMAN
   CUSTOMER
 }
 
-// حالة العميل في مسار البيع (قابلة للتغيير من لوحة التفاصيل)
 enum ContactStage {
-  NEW // عملية بيع جديدة
-  CONTACTING // جاري التواصل
-  INTERESTED // مهتم
-  NEGOTIATING // مقفل للتراسل / تفاوض
-  CUSTOMER // عميل مشترٍ
-  LOST // ضائع
+  NEW
+  CONTACTING
+  INTERESTED
+  NEGOTIATING
+  CUSTOMER
+  LOST
 }
 
-// حالة حملة البث الجماعي
 enum BroadcastStatus {
-  QUEUED // مجدولة للإرسال في وقت مستقبلي
   SENDING
   SENT
   PARTIAL
   FAILED
+  QUEUED
 }
 
-// محفّز سير العمل التلقائي
 enum WorkflowTrigger {
-  KEYWORD // رسالة واردة تحتوي كلمة مفتاحية
-  FROM_NUMBERS // رسالة واردة من أرقام محددة
-  NEW_CONTACT // أول رسالة من عميل جديد
-  STAGE_CHANGE // تغيير حالة العميل في مسار البيع
-  NO_REPLY // مرور ساعات دون رد من العميل — يفحصه الكرون دورياً
-  SHORTCUT // رسالة واردة تحتوي اختصاراً (مطابقة كلمة مفتاحية باسم مستقل)
-  CONVERSATION_OPENED // فتح محادثة جديدة أو إعادة فتح مغلقة
-  CONVERSATION_CLOSED // إغلاق محادثة
-  CONTACT_FIELD_UPDATED // تحديث حقل من حقول جهة الاتصال (الاسم/البريد/الهاتف/الملاحظات)
-  CONTACT_TAG_UPDATED // تحديث وسوم جهة الاتصال
-  WEBHOOK // تشغيل عبر رابط ويب وارد خاص بالسير (hookToken)
-  MANUAL // تشغيل يدوي من الواجهة
-}
-
-// المستخدم: حساب الدخول للمنصة
-model User {
-  id                    String                 @id @default(cuid())
-  name                  String
-  email                 String                 @unique
-  passwordHash          String
-  createdAt             DateTime               @default(now())
-  memberships           WorkspaceMember[]
-  conversationAssignees ConversationAssignee[] // المحادثات المسندة إليه
-  workflows             Workflow[] // سير العمل التي أنشأها
-  sentMessages          Message[] // الرسائل (الملاحظات الداخلية) التي أرسلها
-}
-
-// مساحة العمل: الكيان التجاري الذي يملك الوكلاء والمحادثات
-model Workspace {
-  id                            String                 @id @default(cuid())
-  name                          String
-  createdAt                     DateTime               @default(now())
-  trialStartedAt                DateTime?
-  trialEndsAt                   DateTime?
-  subdomain                     String?                @unique
-  customDomain                  String?                @unique
-  customDomainVerificationToken String?
-  customDomainVerifiedAt        DateTime?
-  members                       WorkspaceMember[]
-  agents                        Agent[]
-  contacts                      Contact[]
-  conversations                 Conversation[]
-  dailyReports                  DailyWorkspaceReport[]
-  usage                         UsageRecord[]
-  settings                      Setting[]
-  templates                     Template[]
-  invites                       WorkspaceInvite[]
-  broadcasts                    BroadcastCampaign[]
-  workflows                     Workflow[]
-  bookings                      Booking[]
-  mediaAssets                   MediaAsset[]
-  cannedResponses               CannedResponse[]
-  scheduledMessages             ScheduledMessage[]
-  leadForms                     LeadForm[]
-  restrictStaff                 Boolean                @default(false) // صحيح = الموظف يرى محادثاته المسندة فقط
-  planId                        String?
-  plan                          Plan?                  @relation(fields: [planId], references: [id], onDelete: SetNull)
-  invoices                      Invoice[]
-}
-
-// باقة الاشتراك: حدود رسائل وأعضاء ووكلاء لكل مساحة عمل
-// التفعيل يدوي في المرحلة الحالية — لاحقاً: Stripe Checkout/webhook يحدّث workspace.planId
-model Plan {
-  id           String      @id @default(cuid())
-  code         String      @unique // STARTER | PRO | BUSINESS
-  name         String // الاسم المعروض
-  priceMonthly Int // بالدولار — للعرض فقط في المرحلة اليدوية
-  messageLimit Int // حد الرسائل الشهري
-  tokenLimit   Int         @default(1000000) // حد توكنات الذكاء الاصطناعي الشهري (استهلاك OpenAI الفعلي)
-  maxMembers   Int         @default(2)
-  maxAgents    Int         @default(1)
-  sortOrder    Int         @default(0)
-  workspaces   Workspace[]
-  invoices     Invoice[]
-}
-
-// حملة بث جماعي: رسالة واحدة لكل جهات الاتصال الحاملة لتسمية معينة
-model BroadcastCampaign {
-  id           String           @id @default(cuid())
-  workspaceId  String
-  tag          String // تسمية الجمهور المستهدف (الأولى من audience.tags — للتوافق الخلفي)
-  audience     Json             @default("{}") // استهداف مركّب: {tags:[], stage:null, inactiveDays:null}
-  linkUrl      String? // رابط العرض — يُدرج مكان {{link}} كرابط تتبّع لكل عميل
-  linkUrlB     String? // رابط نسخة B عند اختبار A/B — يسري على نصف الجمهور
-  body         String           @db.Text // نص الحملة (معاينة القالب إن وُجد)
-  bodyB        String?          @db.Text // نص نسخة B لاختبار A/B — يُرسل لنصف عشوائي من الجمهور
-  templateId   String? // قالب ميتا اختياري
-  params       String[]         @default([]) // قيم المتغيرات {{1}} {{2}}... على مستوى الحملة — تدعم {{name}} للتخصيص لكل عميل
-  status       BroadcastStatus  @default(SENDING)
-  scheduledAt  DateTime? // موعد الإرسال المجدول — null تعني الإرسال الفوري
-  sentAt       DateTime? // وقت إتمام/محاولة الإرسال
-  totalCount   Int              @default(0)
-  sentCount    Int              @default(0)
-  failedCount  Int              @default(0)
-  sentCountB   Int              @default(0) // نتيجة نسخة B من اختبار A/B
-  failedCountB Int              @default(0)
-  createdById  String?
-  createdAt    DateTime         @default(now())
-  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  clicks       BroadcastClick[]
-}
-
-// نقرة على رابط تتبّع داخل حملة — نقرة واحدة تُحتسب لكل عميل
-model BroadcastClick {
-  id         String            @id @default(cuid())
-  campaignId String
-  contactId  String
-  variant    String            @default("A") // نسخة الحملة التي ظهر فيها الرابط: A | B
-  clickedAt  DateTime          @default(now())
-  campaign   BroadcastCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  @@unique([campaignId, contactId])
-}
-
-// إشعار داخلي لعضو الفريق — userId فارغ يعني لكل الأعضاء
-model Notification {
-  id          String    @id @default(cuid())
-  workspaceId String
-  userId      String? // مستلم محدد — null للفريق كله
-  type        String // ASSIGNED | BOOKING | MESSAGE | SYSTEM
-  title       String
-  body        String    @db.Text
-  link        String? // مسار داخلي مثل /inbox?c=<id>
-  readAt      DateTime?
-  createdAt   DateTime  @default(now())
-
-  @@index([workspaceId, userId, createdAt])
-}
-
-// تقرير يومي واحد فقط لكل مساحة عمل؛ يمنع إرسال تقرير اليوم مرتين من الكرون
-model DailyWorkspaceReport {
-  id          String    @id @default(cuid())
-  workspaceId String
-  reportDate  String    @db.VarChar(10) // اليوم السابق بصيغة YYYY-MM-DD
-  status      String    @default("PROCESSING") // PROCESSING | READY | NOTIFYING | NOTIFIED | FAILED
-  body        String?   @db.Text
-  createdAt   DateTime  @default(now())
-  notifiedAt  DateTime?
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@unique([workspaceId, reportDate])
-  @@index([status, reportDate])
-}
-
-// سجل التدقيق: من فعل ماذا ومتى — يُعلَّق اسم المستخدم لأنه قد يُحذف
-model AuditLog {
-  id          String   @id @default(cuid())
-  workspaceId String
-  userId      String?
-  userName    String?
-  action      String // ASSIGN | CLOSE | REOPEN | DELETE | UPDATE | CREATE | SEND
-  entity      String // conversation | workflow | broadcast | member | setting | form | agent | webhook
-  entityId    String?
-  meta        Json?
-  createdAt   DateTime @default(now())
-
-  @@index([workspaceId, createdAt])
-}
-
-// فاتورة اشتراك — تُنشأ من ويب هوك Stripe عند نجاح الدفع
-model Invoice {
-  id              String   @id @default(cuid())
-  workspaceId     String
-  planId          String?
-  amount          Int // بالسنت
-  currency        String   @default("usd")
-  status          String // PAID | PENDING | FAILED
-  stripeSessionId String?  @unique
-  stripeInvoiceId String?
-  createdAt       DateTime @default(now())
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  plan      Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
-}
-
-// ويب هوك وارد: رابط خارجي (متجر/نظام) يرسل أحداثاً تفتح محادثة وتشغّل سير عمل
-model InboundWebhook {
-  id          String    @id @default(cuid())
-  workspaceId String
-  name        String
-  token       String    @unique
-  workflowId  String? // سير عمل يُشغَّل عند كل استقبال
-  autoTag     String    @default("") // وسم يُلصق بجهة الاتصال المولَّدة
-  isActive    Boolean   @default(true)
-  lastHitAt   DateTime?
-  createdAt   DateTime  @default(now())
-}
-
-// اشتراك Push لمتصفح مستخدم — إشعارات PWA
-model PushSubscription {
-  id        String   @id @default(cuid())
-  userId    String
-  endpoint  String   @unique
-  keys      Json // ‏{p256dh, auth}
-  createdAt DateTime @default(now())
-}
-
-// ويب هوك صادر: نرسل نحن الأحداث (رسالة جديدة، عميل جديد…) إلى رابط خارجي يختاره المستخدم
-model OutboundWebhook {
-  id          String    @id @default(cuid())
-  workspaceId String
-  name        String    @default("")
-  url         String // وجهة الإرسال
-  events      String[]  @default([]) // الأحداث المشترك بها: message.created, contact.created…
-  secret      String? // سر توقيع HMAC في ترويسة X-Flovoo-Signature (اختياري)
-  isActive    Boolean   @default(true)
-  lastFiredAt DateTime?
-  lastStatus  Int? // آخر رمز استجابة HTTP
-  createdAt   DateTime  @default(now())
-}
-
-// مفتاح API للوصول البرمجي للقراءة — يُخزن هاشه فقط ويُعرض كاملاً لحظة الإنشاء
-model ApiKey {
-  id          String    @id @default(cuid())
-  workspaceId String
-  name        String
-  keyHash     String    @unique // sha256 للمفتاح الكامل
-  prefix      String // للعرض: آخر 10 أحرف مثلاً
-  scopes      String[]  @default(["read"]) // حالياً read فقط
-  lastUsedAt  DateTime?
-  revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
-}
-
-// دعوة انضمام لمرة واحدة: ينشئها المالك ويرسل الرابط للموظف
-model WorkspaceInvite {
-  id          String     @id @default(cuid())
-  token       String     @unique
-  workspaceId String
-  role        MemberRole @default(STAFF)
-  createdAt   DateTime   @default(now())
-  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-}
-
-// عضوية المستخدم في مساحة عمل مع دوره
-model WorkspaceMember {
-  userId      String
-  workspaceId String
-  role        MemberRole @default(STAFF)
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@id([userId, workspaceId])
-}
-
-// الوكيل الذكي: إعدادات الرد الآلي والشخصية
-model Agent {
-  id               String            @id @default(cuid())
-  workspaceId      String
-  name             String
-  systemPrompt     String
-  welcomeMessage   String
-  offHoursReply    String?           @db.Text // رد تلقائي خارج أوقات الدوام — null يعني استمرار الرد الآلي المعتاد دائماً
-  responseDelaySec Int               @default(3) // تأخير الرد بالثواني ليبدو طبيعياً
-  voiceReplies     Boolean           @default(false)
-  handoffKeywords  String[] // كلمات تفعيل التحويل لموظف بشري
-  instructions     Json              @default("[]") // أقسام التعليمات الإضافية [{id, title, content}]
-  skills           Json              @default("[]") // مفاتيح المهارات المفعّلة (update_contact | update_stage | add_note | request_handoff | close_conversation)
-  skillPrompts     Json              @default("{}") // نصوص مخصصة لكل مهارة {update_contact: "...", ...} — تظهر في بطاقة المهارة بالاستوديو
-  isActive         Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  knowledgeSources KnowledgeSource[]
-  conversations    Conversation[]
-  versions         AgentVersion[]
-}
-
-// نسخة محفوظة من إعدادات الوكيل — تُلتقط عند كل حفظ لتتبع التعديلات والاستعادة
-model AgentVersion {
-  id               String   @id @default(cuid())
-  agentId          String
-  name             String
-  systemPrompt     String
-  welcomeMessage   String
-  responseDelaySec Int
-  voiceReplies     Boolean  @default(false)
-  handoffKeywords  String[]
-  instructions     Json     @default("[]") // لقطة أقسام التعليمات
-  skills           Json     @default("[]") // لقطة المهارات المفعّلة
-  skillPrompts     Json     @default("{}") // لقطة نصوص المهارات المخصصة
-  knowledge        Json     @default("[]") // لقطة لمصادر المعرفة [{title, type, content}]
-  createdById      String?
-  createdAt        DateTime @default(now())
-  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId, createdAt])
-}
-
-// مصدر معرفة: نص أو ملف أو قاعدة بيانات خارجية يعتمد عليها الوكيل في الردود
-model KnowledgeSource {
-  id           String        @id @default(cuid())
-  agentId      String
-  type         KnowledgeType
-  title        String
-  content      String        @db.Text
-  fileUrl      String?
-  url          String? // رابط الموقع المسحوب — يُملأ فقط عند type = WEBSITE
-  lastSyncedAt DateTime? // آخر نجاح لسحب/مزامنة مصدر الموقع
-  // بيانات اتصال مصدر DB (تُملأ فقط عند type = DB)
-  dbEngine     String? // mysql | postgres
-  dbHost       String?
-  dbPort       Int?
-  dbName       String?
-  dbUser       String?
-  dbPassword   String? // كلمة مرور الاتصال — تُخزن كنص صريح حالياً
-  // استعلام القراءة مع العنصر النائب {{phone}} لرقم العميل، مثال:
-  // SELECT name, balance FROM customers WHERE phone = {{phone}}
-  dbQuery      String?       @db.Text
-  createdAt    DateTime      @default(now())
-  agent        Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
-}
-
-// جهة اتصال: عميل واتساب مرتبط بمساحة العمل
-model Contact {
-  id            String                @id @default(cuid())
-  workspaceId   String
-  waPhone       String // رقم الواتساب بصيغة دولية
-  name          String?
-  email         String? // البريد الإلكتروني للعميل (اختياري)
-  notes         String?
-  stage         ContactStage          @default(NEW) // مرحلة العميل في مسار البيع
-  leadScore     Int                   @default(0) // نقاط جودة العميل المحتمل — تُحتسب تلقائياً (انظر lib/scoring.ts)
-  tags          String[]
-  blocked       Boolean               @default(false) // محظور — تتجاهل رسائله الواردة ولا تصله ردود آليّة
-  createdAt     DateTime              @default(now())
-  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  conversations Conversation[]
-  bookings      Booking[]
-  stageHistory  ContactStageHistory[]
-
-  @@unique([workspaceId, waPhone])
-}
-
-// سجل تغيّر مرحلة العميل في مسار البيع — يغذي تقارير التحويل وسجل النشاط
-model ContactStageHistory {
-  id        String       @id @default(cuid())
-  contactId String
-  stage     ContactStage
-  source    String       @default("manual") // manual | workflow | form | ai
-  createdAt DateTime     @default(now())
-  contact   Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-
-  @@index([contactId, createdAt])
-}
-
-// المحادثة: سلسلة رسائل بين جهة اتصال والمنصة
-model Conversation {
-  id                String                 @id @default(cuid())
-  workspaceId       String
-  contactId         String
-  agentId           String?
-  platform          Platform               @default(WHATSAPP)
-  status            ConversationStatus     @default(AI)
-  isCritical        Boolean                @default(false)
-  criticalAt        DateTime?
-  isArchived        Boolean                @default(false)
-  closedAt          DateTime? // وجود قيمة تعني محادثة مغلقة (تختفي من الوارد)
-  lastMessageAt     DateTime?
-  createdAt         DateTime               @default(now())
-  workspace         Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact           Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  agent             Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  assignees         ConversationAssignee[] // الموظفون المسند إليهم المحادثة (متعدد)
-  messages          Message[]
-  scheduledMessages ScheduledMessage[]
-  followUpAt        DateTime? // موعد متابعة المحادثة — يظهر في قائمة "متابعات" بالوارد
-  tags              String[]               @default([]) // وسوم على مستوى المحادثة (مستقلة عن وسوم جهة الاتصال)
-  notes             String?                @db.Text // ملاحظات داخلية على مستوى المحادثة
-  // مزاج/نية العميل — يُحدَّث تلقائياً عند كل رسالة واردة (انظر lib/sentiment.ts)
-  sentiment         String? // INTERESTED | ANGRY | PRICE | NEUTRAL
-  topic             ConversationTopic? // يصنّف تلقائياً من أحدث رسالة واردة
-  summary           String?                @db.Text // ملخص المحادثة المولّد بالذكاء الاصطناعي
-  summarizedAt      DateTime?
-  // تقييم الرضا (CSAT): سؤال 1-5 يُرسل بعد إغلاق المحادثة ويُسجَّل رد العميل
-  csatPending       Boolean                @default(false) // بانتظار رد العميل بتقييم
-  csatRating        Int? // التقييم المسجَّل 1..5
-  csatAskedAt       DateTime? // وقت إرسال سؤال التقييم
-
-  @@index([workspaceId, isCritical, lastMessageAt])
-}
-
-// إسناد محادثة لموظف — نفس المحادثة قد تُسند لأكثر من شخص
-model ConversationAssignee {
-  conversationId String
-  userId         String
-  assignedAt     DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@id([conversationId, userId])
-}
-
-// رد جاهز: اختصار تكتبه في خانة الإرسال يتحول لنص كامل — يختصر وقت الموظف
-model CannedResponse {
-  id          String    @id @default(cuid())
-  workspaceId String
-  shortcut    String // مثال: "س1" — يُطابق مع أول الكلام في خانة الإرسال
-  body        String    @db.Text
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@unique([workspaceId, shortcut])
-}
-
-// رسالة مجدولة: تُرسل تلقائياً في موعدها من الكرون — وصولها خارج نافذة ٢٤ ساعة غير مضمون
-model ScheduledMessage {
-  id             String       @id @default(cuid())
-  workspaceId    String
-  conversationId String
-  body           String       @db.Text
-  sendAt         DateTime
-  sentAt         DateTime? // وجود قيمة تعني أنها أُرسلت
-  attempts       Int          @default(0) // محاولات الإرسال الفاشلة — نتوقف بعد ٥
-  lastError      String? // سبب آخر محاولة فاشلة (للعرض في الواجهة)
-  createdById    String?
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-}
-
-// الرسالة داخل محادثة
-model Message {
-  id             String           @id @default(cuid())
-  conversationId String
-  direction      MessageDirection
-  body           String           @db.Text
-  senderType     SenderType
-  isNote         Boolean          @default(false) // ملاحظة داخلية لا تُرسل للعميل
-  senderId       String? // كاتب الملاحظة (موظف) — اختياري
-  // وسائط واتساب (مزود ميتا): معرّف وسيط ميتا ونوعه وصيغته — body يحمل التسمية التوضيحية
-  mediaId        String?
-  mediaMime      String?
-  mediaType      String? // image | document | audio | video
-  isRead         Boolean          @default(false)
-  rating         String? // تقييم رد الذكاء الاصطناعي: GOOD أو NEEDS_IMPROVEMENT (صفحة التدريب)
-  createdAt      DateTime         @default(now())
-  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User?            @relation(fields: [senderId], references: [id], onDelete: SetNull)
-}
-
-// سجل الاستهلاك الشهري لكل مساحة عمل (لحدود الباقة)
-model UsageRecord {
-  id           String    @id @default(cuid())
-  workspaceId  String
-  month        String // بصيغة "2025-01"
-  messagesUsed Int       @default(0)
-  tokensUsed   Int       @default(0) // توكنات الذكاء الاصطناعي المستهلكة هذا الشهر (OpenAI)
-  messageLimit Int       @default(1000)
-  tokenLimit   Int       @default(1000000) // لقطة حد التوكنات وقت إنشاء السجل
-  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@unique([workspaceId, month])
-}
-
-// مفاتيح التكامل لكل مساحة عمل — القيمة الفارغة/غير الموجودة تعني استخدام .env
-model Setting {
-  workspaceId String
-  key         String
-  value       String    @db.Text
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@id([workspaceId, key])
-}
-
-// إعدادات مالك المنصة على مستوى التطبيق كله (مفاتيح Stripe، رقم الدعم…)
-// تتقدّم على متغيرات البيئة عند وجودها — تُدار من لوحة /admin
-model PlatformSetting {
-  key   String @id
-  value String @db.Text
-}
-
-// سير عمل تلقائي: محفّز + شروط + خطوات متسلسلة تُنفَّذ دون تدخل بشري
-// triggerConfig و steps تُخزَّنان كـ JSON لمرونة تطوير أنواع جديدة دون هجرات
-model Workflow {
-  id            String          @id @default(cuid())
-  workspaceId   String
-  name          String
-  trigger       WorkflowTrigger
-  triggerConfig Json            @default("{}")
-  // رابط الويب الوارد الخاص بالسير — يُنشأ تلقائياً عند اختيار محفز WEBHOOK
-  hookToken     String?         @unique
-  // مثال خطوات: [{ "type": "SEND_MESSAGE", "body": "أهلاً {{name}}" }, { "type": "WAIT", "minutes": 30 }]
-  steps         Json            @default("[]")
-  isActive      Boolean         @default(true)
-  createdById   String?
-  createdBy     User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  runs          WorkflowRun[]
-}
-
-// سجل تشغيل واحد لسير عمل: نتيجة الخطوات + سجل نصي لتتبع الأعطال
-model WorkflowRun {
-  id             String    @id @default(cuid())
-  workflowId     String
-  conversationId String?
-  status         String // SUCCESS | FAILED | WAITING
-  // خطوات متبقية عند التوقف عند خطوة انتظار — يستأنفها الكرون عند حلول الوقت
-  pendingSteps   Json?
-  resumeAt       DateTime?
-  logs           String    @default("") @db.Text
-  createdAt      DateTime  @default(now())
-  workflow       Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-}
-
-// حجز موعد لجهة اتصال — يُنشأ من سير العمل أو يدوياً ويظهر في لوحة جهة الاتصال
-model Booking {
-  id          String    @id @default(cuid())
-  workspaceId String
-  contactId   String
-  title       String
-  scheduledAt DateTime
-  notes       String?
-  remindedAt  DateTime? // وقت إرسال التذكير التلقائي (ساعة قبل الموعد)
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-}
-
-// وسائط مرفوعة من الكمبيوتر لاستخدامها في خطوات سير العمل (SEND_MEDIA)
-// تُخزن base64 — حد الرفع العملي 4MB (قيود استضافة Vercel للطلبات)
-model MediaAsset {
-  id          String    @id @default(cuid())
-  workspaceId String
-  filename    String
-  mime        String
-  folder      String    @default("") // مجلد المكتبة — الفراغ يعني بلا مجلد
-  dataBase64  String    @db.Text
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-}
-
-// نموذج استقبال عملاء (Lead Form): صفحة عامة تعبّئ من المتصفح أو تُضمَّن كـ iframe
-// كل إرسال يُنشئ جهة اتصال + محادثة في الوارد مع وسم تلقائي ورسالة ترحيب
-model LeadForm {
-  id          String    @id @default(cuid())
-  workspaceId String
-  name        String // اسماً داخلياً يميز النموذج في القائمة
-  title       String    @default("تواصل معنا")
-  description String?   @db.Text
-  fields      Json      @default("[]") // ‏[{label, type: text|phone|textarea, required}] — حقل phone واحد مطلوب على الأقل
-  autoTag     String    @default("") // وسم يُلصق تلقائياً بجهة الاتصال الواردة من النموذج
-  autoStage   String? // مرحلة افتراضية لجهة الاتصال (من CONTACT_STAGES)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-}
-
-// قالب رسالة واتساب معتمد في ميتا — يُرسل خارج نافذة ٢٤ ساعة
-model Template {
-  id          String    @id @default(cuid())
-  workspaceId String
-  name        String // اسم القالب كما هو معتمد في ميتا
-  language    String    @default("ar")
-  body        String    @db.Text // نص معاينة يحتوي متغيرات {{1}} {{2}}...
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  KEYWORD
+  FROM_NUMBERS
+  NEW_CONTACT
+  STAGE_CHANGE
+  NO_REPLY
+  SHORTCUT
+  CONVERSATION_OPENED
+  CONVERSATION_CLOSED
+  CONVERSATION_STARTED
+  CONVERSATION_ENDED
+  CONTACT_FIELD_UPDATED
+  CONTACT_TAG_UPDATED
+  WEBHOOK
+  INCOMING_WEBHOOK
+  CLICK_TO_CHAT_AD
+  MANUAL
 }

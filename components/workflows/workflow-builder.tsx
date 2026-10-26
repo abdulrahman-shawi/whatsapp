@@ -503,6 +503,15 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
   const [noReplyHours, setNoReplyHours] = useState<number>(
     (workflow?.triggerConfig as { hours?: number })?.hours ?? 24
   );
+  const [contactField, setContactField] = useState(
+    (workflow?.triggerConfig as { field?: string })?.field ?? "name"
+  );
+  const [contactTag, setContactTag] = useState(
+    (workflow?.triggerConfig as { tag?: string })?.tag ?? ""
+  );
+  const [oncePerContact, setOncePerContact] = useState(
+    (workflow?.triggerConfig as { oncePerContact?: boolean })?.oncePerContact ?? false
+  );
   const [steps, setSteps] = useState<Step[]>(() =>
     normalizeStepsShape(
       Array.isArray(workflow?.steps) ? (workflow!.steps as Step[]) : []
@@ -908,6 +917,22 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
       return `${from} ← ${stageConfig(toStage).label}`;
     }
     if (trigger === "NO_REPLY") return `بعد ${noReplyHours} ساعة من صمت العميل`;
+    if (trigger === "CONTACT_FIELD_UPDATED") {
+      const fields: Record<string, string> = {
+        name: "الاسم",
+        email: "البريد الإلكتروني",
+        notes: "الملاحظات",
+      };
+      return `عند تحديث ${fields[contactField] ?? "حقل"}`;
+    }
+    if (trigger === "CONTACT_TAG_UPDATED") {
+      return contactTag.trim() ? `عند تغيير الوسم «${contactTag.trim()}»` : "عند تغيير أي وسم";
+    }
+    if (trigger === "SHORTCUT") return "يُشغّل يدوياً من قائمة سير العمل";
+    if (trigger === "INCOMING_WEBHOOK") return "عند استدعاء Webhook مرتبط بسير العمل";
+    if (trigger === "CLICK_TO_CHAT_AD") return "عند وصول محادثة من إعلان نقر للدردشة";
+    if (trigger === "CONVERSATION_STARTED") return "عند إنشاء محادثة جديدة";
+    if (trigger === "CONVERSATION_ENDED") return "عند إغلاق المحادثة";
     return "أول رسالة من عميل جديد";
   }
 
@@ -923,7 +948,12 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
             ? { toStage, ...(fromStage ? { fromStage } : {}) }
             : trigger === "NO_REPLY"
               ? { hours: noReplyHours }
-              : {};
+              : trigger === "CONTACT_FIELD_UPDATED"
+                ? { field: contactField }
+                : trigger === "CONTACT_TAG_UPDATED"
+                  ? (contactTag.trim() ? { tag: contactTag.trim() } : {})
+                  : {};
+    triggerConfig.oncePerContact = oncePerContact;
 
     const payload = { name, trigger, triggerConfig, steps };
     const res = await fetch(
@@ -2370,6 +2400,51 @@ export function WorkflowBuilder({ workflow, runs, members, templates, agents, db
                   </p>
                 </div>
               )}
+
+              {trigger === "CONTACT_FIELD_UPDATED" && (
+                <div className="space-y-2">
+                  <Label>الحقل الذي يؤدي تحديثه إلى التشغيل</Label>
+                  <select
+                    value={contactField}
+                    onChange={(e) => setContactField(e.target.value)}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                  >
+                    <option value="name">الاسم</option>
+                    <option value="email">البريد الإلكتروني</option>
+                    <option value="notes">الملاحظات</option>
+                  </select>
+                </div>
+              )}
+
+              {trigger === "CONTACT_TAG_UPDATED" && (
+                <div className="space-y-2">
+                  <Label>وسم محدد (اختياري)</Label>
+                  <Input
+                    value={contactTag}
+                    onChange={(e) => setContactTag(e.target.value)}
+                    placeholder="اتركه فارغاً لمراقبة جميع الوسوم"
+                  />
+                </div>
+              )}
+
+              {["SHORTCUT", "INCOMING_WEBHOOK", "CLICK_TO_CHAT_AD"].includes(trigger) && (
+                <p className="rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">
+                  {trigger === "SHORTCUT"
+                    ? "يمكن تشغيل هذا السير يدوياً لجهة اتصال من قائمة سير العمل."
+                    : trigger === "INCOMING_WEBHOOK"
+                      ? "اربط Webhook وارد بهذا السير من إعدادات التكاملات لتشغيله عند وصول الحدث."
+                      : "يتطلب هذا المحفّز رسالة واردة عبر WhatsApp تحتوي بيانات إحالة إعلان النقر للدردشة من Meta. استخدم {{var:ad_headline}} أو {{var:ad_source_url}} في خطوات الرسائل لإظهار بيانات الإعلان."}
+                </p>
+              )}
+              <label className="flex cursor-pointer items-center gap-2 border-t pt-4 text-sm">
+                <input
+                  type="checkbox"
+                  checked={oncePerContact}
+                  onChange={(e) => setOncePerContact(e.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                يتم التفعيل مرة واحدة لكل جهة اتصال
+              </label>
             </div>
             <div className="border-t p-3">
               <Button className="w-full" onClick={() => setConditionsOpen(false)}>

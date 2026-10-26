@@ -10,25 +10,33 @@ export const WORKFLOW_TRIGGERS = [
   "SHORTCUT",
   "CONVERSATION_OPENED",
   "CONVERSATION_CLOSED",
+  "CONVERSATION_STARTED",
+  "CONVERSATION_ENDED",
   "CONTACT_FIELD_UPDATED",
   "CONTACT_TAG_UPDATED",
   "WEBHOOK",
   "MANUAL",
+  "INCOMING_WEBHOOK",
+  "CLICK_TO_CHAT_AD",
 ] as const;
 
 export const triggerLabels: Record<string, string> = {
   KEYWORD: "رسالة بكلمة مفتاحية",
   FROM_NUMBERS: "رسالة من أرقام محددة",
   NEW_CONTACT: "عميل جديد",
-  STAGE_CHANGE: "تحديث مرحلة العميل (دورة الحياة)",
+  STAGE_CHANGE: "تحديث حالة العميل",
   NO_REPLY: "لا رد من العميل",
-  SHORTCUT: "اختصار",
+  SHORTCUT: "اختصار يدوي",
   CONVERSATION_OPENED: "تم فتح المحادثة",
   CONVERSATION_CLOSED: "تم إغلاق المحادثة",
-  CONTACT_FIELD_UPDATED: "تم تحديث حقل الاتصال",
-  CONTACT_TAG_UPDATED: "تم تحديث وسم الاتصال",
+  CONVERSATION_STARTED: "بدء المحادثة",
+  CONVERSATION_ENDED: "انتهاء المحادثة",
+  CONTACT_FIELD_UPDATED: "تحديث حقل جهة الاتصال",
+  CONTACT_TAG_UPDATED: "تحديث وسم جهة الاتصال",
   WEBHOOK: "رابط ويب وارد",
   MANUAL: "تنشيط يدوي",
+  INCOMING_WEBHOOK: "Webhook وارد",
+  CLICK_TO_CHAT_AD: "إعلانات النقر للدردشة",
 };
 
 // حقول جهة الاتصال المتاحة في محفّز "تحديث حقل الاتصال"
@@ -211,6 +219,17 @@ function validateTriggerConfig(
       config.hours = Math.round(hours);
     }
   }
+  if (trigger === "CONTACT_FIELD_UPDATED") {
+    if (!["name", "email", "notes"].includes(String(src.field))) {
+      errors.push("محفّز تحديث الحقل: اختر الاسم أو البريد الإلكتروني أو الملاحظات");
+    } else {
+      config.field = src.field;
+    }
+  }
+  if (trigger === "CONTACT_TAG_UPDATED" && typeof src.tag === "string" && src.tag.trim()) {
+    config.tag = src.tag.trim();
+  }
+  if (src.oncePerContact === true) config.oncePerContact = true;
   return config;
 }
 

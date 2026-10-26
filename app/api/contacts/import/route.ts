@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
 import { recalculateLeadScore } from "@/lib/scoring";
+import { triggerWorkflows } from "@/lib/workflows";
 
 // استيراد عملاء من ملف CSV (multipart form-data، الحقل "file")
 // الأعمدة المتوقعة في السطر الأول: name, phone (مطلوب), tags, notes, stage
@@ -101,7 +102,7 @@ export async function POST(req: Request) {
         where: {
           workspaceId_waPhone: { workspaceId: ctx.workspaceId, waPhone: phone },
         },
-        select: { id: true, name: true, stage: true },
+        select: { id: true, name: true, notes: true, tags: true, stage: true },
       });
 
       const data = {
@@ -122,10 +123,21 @@ export async function POST(req: Request) {
               tags,
             },
           });
+      const changedFields = [
+        ...(existing && name && !existing.name ? (["name"] as const) : []),
+        ...(existing && notes && notes !== existing.notes ? (["notes"] as const) : []),
+      ];
+      const changedTags = existing
+        ? [
+            ...existing.tags.filter((tag) => !contact.tags.includes(tag)),
+            ...contact.tags.filter((tag) => !existing.tags.includes(tag)),
+          ]
+        : [];
 
       if (existing) updated++;
       else imported++;
 
+      const changedStage = Boolean(stage && existing && contact.stage !== stage);
       if (stage && contact.stage !== stage) {
         await prisma.contact.update({
           where: { id: contact.id },
@@ -135,6 +147,62 @@ export async function POST(req: Request) {
         void recalculateLeadScore(contact.id);
       } else {
         void recalculateLeadScore(contact.id);
+      }
+      if (changedFields.length > 0 || changedTags.length > 0 || changedStage) {
+        const conversation = await prisma.conversation.findFirst({
+          where: {
+            workspaceId: ctx.workspaceId,
+            contactId: contact.id,
+            isArchived: false,
+            closedAt: null,
+          },
+          orderBy: { lastMessageAt: "desc" },
+          select: { id: true },
+        });
+        const workflowContext = {
+          workspaceId: ctx.workspaceId,
+          contactId: contact.id,
+          waPhone: contact.waPhone,
+          contactName: contact.name,
+          text: "",
+          conversationId: conversation?.id,
+          stage: stage ?? contact.stage,
+          tags: contact.tags,
+          vars: {},
+        };
+        for (const field of changedFields) {
+          void triggerWorkflows(
+            ctx.workspaceId,
+            "CONTACT_FIELD_UPDATED",
+            { field },
+            {
+              ...workflowContext,
+              vars: { field, value: String(contact[field] ?? "") },
+            }
+          ).catch((error) =>
+            console.error(`[contacts/import] فشل محفّز تحديث الحقل "${field}":`, error)
+          );
+        }
+        for (const tag of changedTags) {
+          void triggerWorkflows(
+            ctx.workspaceId,
+            "CONTACT_TAG_UPDATED",
+            { changedTag: tag },
+            { ...workflowContext, vars: { tag } }
+          ).catch((error) =>
+            console.error(`[contacts/import] فشل محفّز تحديث الوسم "${tag}":`, error)
+          );
+        }
+        if (changedStage && stage && existing) {
+          void triggerWorkflows(
+            ctx.workspaceId,
+            "STAGE_CHANGE",
+            { fromStage: existing.stage, toStage: stage },
+            workflowContext
+          ).catch((error) =>
+            console.error("[contacts/import] فشل محفّز تحديث المرحلة:", error)
+          );
+        }
       }
     } catch (e) {
       skip(

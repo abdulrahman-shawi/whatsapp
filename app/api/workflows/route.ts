@@ -11,6 +11,13 @@ const TRIGGERS = [
   "NEW_CONTACT",
   "STAGE_CHANGE",
   "NO_REPLY",
+  "CONVERSATION_STARTED",
+  "CONVERSATION_ENDED",
+  "CONTACT_FIELD_UPDATED",
+  "CONTACT_TAG_UPDATED",
+  "SHORTCUT",
+  "INCOMING_WEBHOOK",
+  "CLICK_TO_CHAT_AD",
 ] as const;
 
 // قائمة سير العمل لمساحة العمل
@@ -90,6 +97,19 @@ export async function POST(req: Request) {
     }
     triggerConfig.hours = Math.round(hours);
   }
+  if (trigger === "CONTACT_FIELD_UPDATED") {
+    if (!["name", "email", "notes"].includes(String(tc.field))) {
+      return NextResponse.json(
+        { error: "اختر الحقل الذي سيؤدي تحديثه إلى تشغيل سير العمل" },
+        { status: 400 }
+      );
+    }
+    triggerConfig.field = tc.field;
+  }
+  if (trigger === "CONTACT_TAG_UPDATED" && typeof tc.tag === "string" && tc.tag.trim()) {
+    triggerConfig.tag = tc.tag.trim();
+  }
+  if (tc.oncePerContact === true) triggerConfig.oncePerContact = true;
 
   // التحقق من الخطوات مقابل أعضاء الفريق الفعليين
   const members = await prisma.workspaceMember.findMany({

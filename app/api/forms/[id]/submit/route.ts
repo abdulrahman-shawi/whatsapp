@@ -5,6 +5,7 @@ import { triggerConversationUpdated, triggerNewMessage } from "@/lib/pusher";
 import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
 import { recalculateLeadScore } from "@/lib/scoring";
+import { triggerWorkflows } from "@/lib/workflows";
 import type { LeadFormField } from "@/lib/lead-forms";
 import { detectConversationTopic, detectSentiment } from "@/lib/sentiment";
 
@@ -115,6 +116,7 @@ export async function POST(
     where: { contactId: contact.id, platform: "WHATSAPP", isArchived: false },
     orderBy: { lastMessageAt: "desc" },
   });
+  const isNewConversation = !conversation;
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: {
@@ -143,6 +145,60 @@ export async function POST(
       topic: detectConversationTopic(bodyText),
     },
   });
+  if (isNewConversation) {
+    triggerWorkflows(
+      workspaceId,
+      "CONVERSATION_STARTED",
+      {},
+      {
+        workspaceId,
+        contactId: contact.id,
+        waPhone: phone,
+        contactName: contact.name,
+        text: bodyText,
+        conversationId: conversation.id,
+        stage: contact.stage,
+        tags: contact.tags,
+        vars: {},
+      }
+    ).catch((e) => console.error("[forms] فشل تشغيل محفّز بدء المحادثة:", e));
+  }
+  if (existing && contactName && !existing.name) {
+    triggerWorkflows(
+      workspaceId,
+      "CONTACT_FIELD_UPDATED",
+      { field: "name" },
+      {
+        workspaceId,
+        contactId: contact.id,
+        waPhone: phone,
+        contactName: contact.name,
+        text: bodyText,
+        conversationId: conversation.id,
+        stage: contact.stage,
+        tags: contact.tags,
+        vars: { field: "name", value: contact.name ?? "" },
+      }
+    ).catch((e) => console.error("[forms] فشل تشغيل محفّز تحديث الاسم:", e));
+  }
+  if (form.autoTag && !existing?.tags.includes(form.autoTag)) {
+    triggerWorkflows(
+      workspaceId,
+      "CONTACT_TAG_UPDATED",
+      { changedTag: form.autoTag },
+      {
+        workspaceId,
+        contactId: contact.id,
+        waPhone: phone,
+        contactName: contact.name,
+        text: bodyText,
+        conversationId: conversation.id,
+        stage: contact.stage,
+        tags: contact.tags,
+        vars: { tag: form.autoTag },
+      }
+    ).catch((e) => console.error("[forms] فشل تشغيل محفّز تحديث الوسم:", e));
+  }
 
   // رسالة الترحيب الفورية — أفضل جهد: عطل واتساب لا يفشل الإرسالة أبداً
   if (agent?.welcomeMessage) {

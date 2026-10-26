@@ -155,7 +155,7 @@ export type TriggerConfig =
   | { fromStage?: string; toStage: string } // STAGE_CHANGE
   | { hours: number } // NO_REPLY — ساعات صمت العميل قبل التشغيل
   | { field?: string } // CONTACT_FIELD_UPDATED — الحقل المتغير (name/email/phone/notes)
-  | { tag?: string }; // CONTACT_TAG_UPDATED — الوسم المضاف
+  | { tag?: string; changedTag?: string }; // CONTACT_TAG_UPDATED — الوسم المضاف/المتغيّر
 
 // أسماء محفّزات يمكن إطلاقها عبر triggerWorkflows — WEBHOOK وMANUAL يُشغَّلان مباشرة
 export type TriggerWorkflowsTrigger =
@@ -163,11 +163,16 @@ export type TriggerWorkflowsTrigger =
   | "FROM_NUMBERS"
   | "NEW_CONTACT"
   | "STAGE_CHANGE"
+  | "NO_REPLY"
   | "SHORTCUT"
   | "CONVERSATION_OPENED"
   | "CONVERSATION_CLOSED"
+  | "CONVERSATION_STARTED"
+  | "CONVERSATION_ENDED"
   | "CONTACT_FIELD_UPDATED"
-  | "CONTACT_TAG_UPDATED";
+  | "CONTACT_TAG_UPDATED"
+  | "INCOMING_WEBHOOK"
+  | "CLICK_TO_CHAT_AD";
 
 // سياق التشغيل: بيانات العميل والمحادثة التي أطلقت المحفّز
 export type WorkflowContext = {
@@ -180,6 +185,7 @@ export type WorkflowContext = {
   stage?: string; // تُملأ تلقائياً من جهة الاتصال عند بدء التشغيل
   tags?: string[]; // تُملأ تلقائياً — تدعم {{tags}} في الرسائل
   vars: Record<string, string>; // متغيرات بين الخطوات — مثل نتيجة {{db}}
+  triggerDepth?: number;
 };
 
 export const WORKFLOW_STEP_TYPES = [
@@ -992,7 +998,11 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       });
       return `رُبطت المحادثة بالوكيل "${agent.name}"`;
     }
-    case "SET_STAGE":
+    case "SET_STAGE": {
+      const contact = await prisma.contact.findUnique({
+        where: { id: ctx.contactId },
+        select: { stage: true },
+      });
       await prisma.contact.update({
         where: { id: ctx.contactId },
         data: { stage: step.stage as never },
@@ -1000,7 +1010,16 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       // سجل المراحل (المصدر: سير العمل) + إعادة احتساب نقاط العميل
       await recordStageChange(ctx.contactId, step.stage as never, "workflow");
       void recalculateLeadScore(ctx.contactId);
+      if (contact && contact.stage !== step.stage) {
+        await triggerWorkflows(
+          ctx.workspaceId,
+          "STAGE_CHANGE",
+          { fromStage: contact.stage, toStage: step.stage },
+          ctx
+        );
+      }
       return "حُدِّثت حالة العميل";
+    }
     case "ADD_TAG": {
       const contact = await prisma.contact.findUnique({
         where: { id: ctx.contactId },
@@ -1011,6 +1030,12 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
           where: { id: ctx.contactId },
           data: { tags: { push: tag } },
         });
+        await triggerWorkflows(
+          ctx.workspaceId,
+          "CONTACT_TAG_UPDATED",
+          { changedTag: tag },
+          { ...ctx, vars: { ...ctx.vars, tag } }
+        );
       }
       return "أُضيف الوسم";
     }
@@ -1024,6 +1049,12 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
           where: { id: ctx.contactId },
           data: { tags: contact.tags.filter((t) => t !== tag) },
         });
+        await triggerWorkflows(
+          ctx.workspaceId,
+          "CONTACT_TAG_UPDATED",
+          { changedTag: tag },
+          { ...ctx, vars: { ...ctx.vars, tag } }
+        );
       }
       return "أُزيل الوسم";
     }
@@ -1075,10 +1106,17 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
     }
     case "CLOSE": {
       if (!ctx.conversationId) throw new Error("لا توجد محادثة لإغلاقها");
-      await prisma.conversation.update({
+      const conversation = await prisma.conversation.findUnique({
         where: { id: ctx.conversationId },
-        data: { closedAt: new Date() },
+        select: { closedAt: true },
       });
+      if (conversation && !conversation.closedAt) {
+        await prisma.conversation.update({
+          where: { id: ctx.conversationId },
+          data: { closedAt: new Date() },
+        });
+        await triggerWorkflows(ctx.workspaceId, "CONVERSATION_ENDED", {}, ctx);
+      }
       return "أُغلقت المحادثة";
     }
     case "DELETE_CONVERSATION": {
@@ -1238,7 +1276,7 @@ export async function executeWorkflow(
   ctx: WorkflowContext,
   pendingSteps?: unknown,
   runId?: string
-): Promise<void> {
+): Promise<"SUCCESS" | "FAILED" | "WAITING"> {
   const steps = (pendingSteps ?? workflow.steps) as WorkflowStep[];
   const logs: string[] = [];
   let failed = false;
@@ -1291,7 +1329,7 @@ export async function executeWorkflow(
       console.log(
         `[workflows] "${workflow.name}" توقف عند الانتظار ${step.minutes}د — التشغيل ${runId ?? "جديد"}`
       );
-      return;
+      return "WAITING";
     }
 
     if (step.type === "IF") {
@@ -1393,6 +1431,55 @@ export async function executeWorkflow(
       data: { workflowId: workflow.id, conversationId: ctx.conversationId ?? null, ...data },
     });
   }
+  return failed ? "FAILED" : "SUCCESS";
+}
+
+export async function executeTriggeredWorkflow(
+  workflow: { id: string; name: string; steps: unknown; triggerConfig: unknown },
+  ctx: WorkflowContext
+): Promise<"SUCCESS" | "FAILED" | "WAITING" | "SKIPPED"> {
+  const oncePerContact =
+    (workflow.triggerConfig as { oncePerContact?: unknown } | null)?.oncePerContact === true;
+  if (!oncePerContact) return executeWorkflow(workflow, ctx);
+
+  try {
+    await prisma.workflowContactActivation.create({
+      data: { workflowId: workflow.id, contactId: ctx.contactId },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return "SKIPPED";
+    }
+    throw error;
+  }
+
+  try {
+    const status = await executeWorkflow(workflow, ctx);
+    if (status === "FAILED") {
+      await prisma.workflowContactActivation.delete({
+        where: {
+          workflowId_contactId: {
+            workflowId: workflow.id,
+            contactId: ctx.contactId,
+          },
+        },
+      });
+    }
+    return status;
+  } catch (error) {
+    await prisma.workflowContactActivation.delete({
+      where: {
+        workflowId_contactId: {
+          workflowId: workflow.id,
+          contactId: ctx.contactId,
+        },
+      },
+    });
+    throw error;
+  }
 }
 
 // مطابقة سير عمل واحد مع حدث محفّز — يعيد true عند تحقق الشروط
@@ -1432,8 +1519,9 @@ function workflowMatches(
     case "CONTACT_TAG_UPDATED": {
       const wanted = tc.tag;
       if (typeof wanted !== "string" || !wanted) return true; // بلا فلتر: أي وسم
-      const change = config as { tag?: string };
-      return wanted === change.tag;
+      // المتصلون يمرّرون changedTag (أو tag) — ندعم الشكلين
+      const change = config as { tag?: string; changedTag?: string };
+      return wanted === (change.tag ?? change.changedTag);
     }
     case "STAGE_CHANGE": {
       const to = tc.toStage;
@@ -1443,6 +1531,11 @@ function workflowMatches(
       if (from && from !== (change.fromStage ?? "")) return false;
       return true;
     }
+    case "CONVERSATION_STARTED":
+    case "CONVERSATION_ENDED":
+    case "INCOMING_WEBHOOK":
+    case "CLICK_TO_CHAT_AD":
+      return true;
     default:
       return false;
   }
@@ -1456,6 +1549,13 @@ export async function triggerWorkflows(
   config: TriggerConfig,
   ctx: WorkflowContext
 ): Promise<void> {
+  const triggerDepth = ctx.triggerDepth ?? 0;
+  if (triggerDepth >= 10) {
+    console.error(
+      `[workflows] إيقاف سلسلة محفّزات متداخلة عند الحد الأقصى (${triggerDepth})`
+    );
+    return;
+  }
   const workflows = await prisma.workflow.findMany({
     where: { workspaceId, isActive: true, trigger },
   });
@@ -1463,7 +1563,10 @@ export async function triggerWorkflows(
     if (!workflowMatches(workflow, trigger, config, ctx)) continue;
     // التشغيل متسلسل ومنتظر — خطوة "إيقاف الرد الآلي" يجب أن تسبق قرار الوكيل
     try {
-      await executeWorkflow(workflow, ctx);
+      await executeTriggeredWorkflow(workflow, {
+        ...ctx,
+        triggerDepth: triggerDepth + 1,
+      });
     } catch (e) {
       console.error(`[workflows] فشل تشغيل "${workflow.name}":`, e);
     }
@@ -1525,8 +1628,8 @@ export async function runNoReplyWorkflows(): Promise<number> {
         vars: {},
       };
       try {
-        await executeWorkflow(workflow, ctx);
-        fired++;
+        const status = await executeTriggeredWorkflow(workflow, ctx);
+        if (status !== "SKIPPED") fired++;
       } catch (e) {
         console.error(`[workflows] فشل تشغيل NO_REPLY "${workflow.name}":`, e);
       }

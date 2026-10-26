@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "النص قصير جداً للتحسين" }, { status: 400 });
   }
 
-  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const aiConfig = await resolveAiConfig();
   const result = await generateWorkspaceReply(
     ctx.workspaceId,
     [

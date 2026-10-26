@@ -48,7 +48,7 @@ export async function POST(
     )
     .join("\n");
 
-  const config = await resolveAiConfig(ctx.workspaceId);
+  const config = await resolveAiConfig();
   const result = await generateWorkspaceReply(
     ctx.workspaceId,
     [

@@ -46,7 +46,6 @@ function Steps({ items }: { items: React.ReactNode[] }) {
 }
 
 const SECTIONS = [
-  { id: "openai", label: "مفتاح OpenAI" },
   { id: "whatsapp", label: "مفاتيح واتساب (٤)" },
   { id: "pusher", label: "مفاتيح Pusher (٤)" },
   { id: "database", label: "قاعدة البيانات" },
@@ -87,69 +86,11 @@ export default async function GuidePage() {
         </div>
       </div>
 
-      {/* ١. مفتاح OpenAI */}
-      <Card id="openai" className="scroll-mt-20">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-lg">١. مفتاح OpenAI</CardTitle>
-            <Badge variant="outline" dir="ltr">OPENAI_API_KEY</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Steps
-            items={[
-              <>
-                ادخل <ExtLink href="https://platform.openai.com">platform.openai.com</ExtLink>{" "}
-                وسجّل دخولك (أو أنشئ حساباً جديداً).
-              </>,
-              <>
-                من القائمة الجانبية اختر «API keys» (أو Settings ثم API keys).
-              </>,
-              <>
-                اضغط «Create new secret key»، سمّها (مثلاً whatsapp-saas) ثم اضغط Create.
-              </>,
-              <>
-                انسخ المفتاح فوراً — يظهر مرة واحدة فقط ويبدأ بـ <code dir="ltr">sk-</code>.
-              </>,
-            ]}
-          />
-          <MockScreenshot title="platform.openai.com/api-keys">
-            <div className="flex gap-3">
-              {/* القائمة الجانبية */}
-              <div className="w-28 space-y-2 border-e pe-2">
-                <Bar className="w-16" />
-                <Bar className="w-20" />
-                <Hl label="اختر API keys">
-                  <span className="block rounded bg-accent px-2 py-1 text-[10px] font-medium text-accent-foreground">
-                    API keys
-                  </span>
-                </Hl>
-                <Bar className="w-14" />
-              </div>
-              {/* المحتوى */}
-              <div className="flex-1 space-y-2">
-                <Bar className="w-32" />
-                <Bar className="w-full" />
-                <div className="pt-2 text-left">
-                  <Hl label="اضغط هنا">
-                    <MockButton>Create new secret key</MockButton>
-                  </Hl>
-                </div>
-              </div>
-            </div>
-          </MockScreenshot>
-          <Callout>
-            الردود الذكية لن تعمل دون رصيد مدفوع — من Billing ← Add payment
-            method أضف بطاقة واشحن ٥$ مثلاً تكفي لآلاف الرسائل.
-          </Callout>
-        </CardContent>
-      </Card>
-
-      {/* ٢. مفاتيح واتساب */}
+      {/* ١. مفاتيح واتساب */}
       <Card id="whatsapp" className="scroll-mt-20">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-lg">٢. مفاتيح واتساب (٤ مفاتيح)</CardTitle>
+            <CardTitle className="text-lg">١. مفاتيح واتساب (٤ مفاتيح)</CardTitle>
             <Badge variant="outline" dir="ltr">WHATSAPP_TOKEN</Badge>
             <Badge variant="outline" dir="ltr">WHATSAPP_PHONE_NUMBER_ID</Badge>
             <Badge variant="outline" dir="ltr">META_APP_SECRET</Badge>
@@ -349,11 +290,11 @@ export default async function GuidePage() {
         </CardContent>
       </Card>
 
-      {/* ٣. مفاتيح Pusher */}
+      {/* ٢. مفاتيح Pusher */}
       <Card id="pusher" className="scroll-mt-20">
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-lg">٣. مفاتيح Pusher (٤ مفاتيح)</CardTitle>
+            <CardTitle className="text-lg">٢. مفاتيح Pusher (٤ مفاتيح)</CardTitle>
             <Badge variant="outline" dir="ltr">PUSHER_APP_ID</Badge>
             <Badge variant="outline" dir="ltr">PUSHER_KEY</Badge>
             <Badge variant="outline" dir="ltr">PUSHER_SECRET</Badge>
@@ -412,11 +353,11 @@ export default async function GuidePage() {
         </CardContent>
       </Card>
 
-      {/* ٤. قاعدة البيانات */}
+      {/* ٣. قاعدة البيانات */}
       <Card id="database" className="scroll-mt-20">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CardTitle className="text-lg">٤. قاعدة البيانات (عبر Neon)</CardTitle>
+            <CardTitle className="text-lg">٣. قاعدة البيانات (عبر Neon)</CardTitle>
             <Badge variant="outline" dir="ltr">DATABASE_URL</Badge>
           </div>
         </CardHeader>
@@ -460,11 +401,11 @@ export default async function GuidePage() {
         </CardContent>
       </Card>
 
-      {/* ٥. الأسرار المولّدة ذاتياً */}
+      {/* ٤. الأسرار المولّدة ذاتياً */}
       <Card id="secrets" className="scroll-mt-20">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CardTitle className="text-lg">٥. الأسرار المولّدة ذاتياً</CardTitle>
+            <CardTitle className="text-lg">٤. الأسرار المولّدة ذاتياً</CardTitle>
             <Badge variant="outline" dir="ltr">NEXTAUTH_SECRET</Badge>
             <Badge variant="outline" dir="ltr">CRON_SECRET</Badge>
           </div>

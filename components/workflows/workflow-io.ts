@@ -7,15 +7,37 @@ export const WORKFLOW_TRIGGERS = [
   "NEW_CONTACT",
   "STAGE_CHANGE",
   "NO_REPLY",
+  "SHORTCUT",
+  "CONVERSATION_OPENED",
+  "CONVERSATION_CLOSED",
+  "CONTACT_FIELD_UPDATED",
+  "CONTACT_TAG_UPDATED",
+  "WEBHOOK",
+  "MANUAL",
 ] as const;
 
 export const triggerLabels: Record<string, string> = {
   KEYWORD: "رسالة بكلمة مفتاحية",
   FROM_NUMBERS: "رسالة من أرقام محددة",
   NEW_CONTACT: "عميل جديد",
-  STAGE_CHANGE: "تغيير حالة العميل",
+  STAGE_CHANGE: "تحديث مرحلة العميل (دورة الحياة)",
   NO_REPLY: "لا رد من العميل",
+  SHORTCUT: "اختصار",
+  CONVERSATION_OPENED: "تم فتح المحادثة",
+  CONVERSATION_CLOSED: "تم إغلاق المحادثة",
+  CONTACT_FIELD_UPDATED: "تم تحديث حقل الاتصال",
+  CONTACT_TAG_UPDATED: "تم تحديث وسم الاتصال",
+  WEBHOOK: "رابط ويب وارد",
+  MANUAL: "تنشيط يدوي",
 };
+
+// حقول جهة الاتصال المتاحة في محفّز "تحديث حقل الاتصال"
+export const CONTACT_FIELD_OPTIONS = [
+  { value: "name", label: "الاسم" },
+  { value: "email", label: "البريد الإلكتروني" },
+  { value: "phone", label: "الهاتف" },
+  { value: "notes", label: "الملاحظات" },
+] as const;
 
 export const WORKFLOW_STEP_LABELS: Record<string, string> = {
   SEND_MESSAGE: "إرسال رسالة أو قالب",

@@ -1,4 +1,4 @@
-import { getIntegration } from "@/lib/settings";
+import { getPlatformConfig } from "@/lib/platform-config";
 
 // توليد رد ذكي عبر أي واجهة متوافقة مع OpenAI — يعيد null عند أي فشل
 // يدعم Tool Calling: تمرير أدوات اختيارية وقراءة طلبات استدعائها من المزود
@@ -50,24 +50,24 @@ export type AiConfig = {
   apiKey: string | null;
   baseUrl: string;
   model: string;
+  // المزوّد الفعلي بعد الحل — يهم ميزات مثل التفريغ الصوتي المقصور على بعض المزودين
+  provider: string;
 };
 
-// حلّ إعدادات الذكاء الاصطناعي لمساحة العمل:
-// المزوّد من AI_PROVIDER (افتراضي openai)، والرابط/النموذج من التجاوزات أو الجاهز
-export async function resolveAiConfig(workspaceId: string): Promise<AiConfig> {
-  const [apiKey, provider, baseUrl, model] = await Promise.all([
-    getIntegration(workspaceId, "OPENAI_API_KEY"),
-    getIntegration(workspaceId, "AI_PROVIDER"),
-    getIntegration(workspaceId, "AI_BASE_URL"),
-    getIntegration(workspaceId, "AI_MODEL"),
-  ]);
+// حلّ إعدادات الذكاء الاصطناعي من لوحة مالك المنصة (/admin) — تُطبَّق على كل المساحات،
+// ولا يستطيع العملاء ضبطها أو تجاوزها؛ .env هو البديل عندما لا تُضبط من اللوحة
+export async function resolveAiConfig(): Promise<AiConfig> {
+  const platform = await getPlatformConfig();
+  const provider = platform.AI_PROVIDER.trim() || "openai";
   const preset =
-    AI_PROVIDERS[(provider ?? "openai") as keyof typeof AI_PROVIDERS] ??
-    AI_PROVIDERS.openai;
+    AI_PROVIDERS[provider as keyof typeof AI_PROVIDERS] ?? AI_PROVIDERS.openai;
+  const baseUrl = platform.AI_BASE_URL.trim();
+  const model = platform.AI_MODEL.trim();
   return {
-    apiKey,
+    apiKey: platform.OPENAI_API_KEY.trim() || null,
     baseUrl: baseUrl || preset.baseUrl,
     model: model || preset.model,
+    provider,
   };
 }
 

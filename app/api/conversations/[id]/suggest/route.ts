@@ -54,7 +54,7 @@ export async function POST(
   );
 
   // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
-  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const aiConfig = await resolveAiConfig();
   const result = await generateWorkspaceReply(
     ctx.workspaceId,
     history,

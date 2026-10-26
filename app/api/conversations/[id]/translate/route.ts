@@ -94,7 +94,7 @@ export async function POST(
     [{ role: "user", content: body.text.trim() }],
     instruction,
     [],
-    await resolveAiConfig(ctx.workspaceId),
+    await resolveAiConfig(),
     1024
   );
   if (result.quotaExceeded) {

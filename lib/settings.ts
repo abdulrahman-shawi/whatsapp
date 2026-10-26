@@ -1,24 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { getPlatformConfig, type PlatformConfig } from "@/lib/platform-config";
 
-// مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً، ثم إعدادات المنصة من لوحة المدير، ثم .env كبديل
+// مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً، ثم .env كبديل
+// مفاتيح الذكاء الاصطناعي مقصورة على مالك المنصة من لوحة /admin (راجع lib/platform-config.ts)
 export const INTEGRATION_KEYS = [
-  { key: "AI_PROVIDER", label: "مزوّد الذكاء الاصطناعي", env: ["AI_PROVIDER"] },
-  {
-    key: "OPENAI_API_KEY",
-    label: "مفتاح الذكاء الاصطناعي (API Key)",
-    env: ["OPENAI_API_KEY"],
-  },
-  {
-    key: "AI_MODEL",
-    label: "اسم النموذج (اختياري)",
-    env: ["AI_MODEL"],
-  },
-  {
-    key: "AI_BASE_URL",
-    label: "رابط API مخصص (اختياري)",
-    env: ["AI_BASE_URL"],
-  },
   { key: "WHATSAPP_TOKEN", label: "توكن واتساب", env: ["WHATSAPP_TOKEN"] },
   {
     key: "WHATSAPP_VERIFY_TOKEN",
@@ -75,27 +59,11 @@ export type IntegrationKey = (typeof INTEGRATION_KEYS)[number]["key"];
 
 // مفاتيح غير سرية — تُعرض قيمتها كنص صريح في الواجهة بدل الإخفاء
 const NON_SECRET = new Set<string>([
-  "AI_PROVIDER",
-  "AI_MODEL",
-  "AI_BASE_URL",
   "BUSINESS_HOURS_START",
   "BUSINESS_HOURS_END",
   "BUSINESS_HOURS_DAYS",
   "BUSINESS_HOURS_TIMEZONE",
 ]);
-
-// خيارات القائمة المنسدلة للمفاتيح التي تُختار من قائمة بدل الإدخال الحر
-export const KEY_OPTIONS: Partial<
-  Record<IntegrationKey, readonly { value: string; label: string }[]>
-> = {
-  AI_PROVIDER: [
-    { value: "openai", label: "OpenAI" },
-    { value: "gemini", label: "Google Gemini" },
-    { value: "kimi", label: "Kimi (Moonshot)" },
-    { value: "openrouter", label: "OpenRouter (Claude وغيره)" },
-    { value: "custom", label: "مخصص — رابط خاص" },
-  ],
-};
 
 const KEY_SET = new Set<string>(INTEGRATION_KEYS.map((d) => d.key));
 
@@ -103,23 +71,10 @@ export function isIntegrationKey(key: string): key is IntegrationKey {
   return KEY_SET.has(key);
 }
 
-// المفاتيح التي يستطيع مالك المنصة ضبطها من لوحة /admin كافتراضي لكل المساحات
-const PLATFORM_MANAGED = new Set<string>([
-  "OPENAI_API_KEY",
-  "AI_PROVIDER",
-  "AI_MODEL",
-  "AI_BASE_URL",
-]);
-
-// قيمة البديلة لمفتاح: إعدادات المنصة (لوحة المدير) أولاً ثم .env — يجرّب كل الأسماء المعروفة بالترتيب
+// قيمة البديلة لمفتاح: نجرّب كل الأسماء المعروفة في .env بالترتيب
 async function envFallback(
   def: (typeof INTEGRATION_KEYS)[number]
 ): Promise<string | null> {
-  if (PLATFORM_MANAGED.has(def.key)) {
-    const platform = await getPlatformConfig();
-    const v = platform[def.key as keyof PlatformConfig]?.trim();
-    if (v) return v;
-  }
   for (const name of def.env) {
     const v = process.env[name];
     if (v) return v;
@@ -189,8 +144,7 @@ export type IntegrationInfo = {
   // القيمة الصريحة للمفاتيح غير السرية فقط — null للسرية
   value: string | null;
   secret: boolean;
-  options: readonly { value: string; label: string }[] | null;
-  source: "db" | "platform" | "env" | null;
+  source: "db" | "env" | null;
 };
 
 // قائمة مقنّعة للعرض في الواجهة — القيم السرية لا تُرجع خاماً أبداً
@@ -204,7 +158,6 @@ export async function getIntegrationList(
   return Promise.all(
     INTEGRATION_KEYS.map(async (def) => {
       const secret = !NON_SECRET.has(def.key);
-      const options = KEY_OPTIONS[def.key] ?? null;
       const row = rows.find((r) => r.key === def.key);
       const raw = row?.value || (await envFallback(def));
       const source = row?.value ? "db" : raw ? "env" : null;
@@ -215,7 +168,6 @@ export async function getIntegrationList(
         masked: secret && raw ? mask(raw) : null,
         value: secret ? null : raw,
         secret,
-        options,
         source,
       };
     })

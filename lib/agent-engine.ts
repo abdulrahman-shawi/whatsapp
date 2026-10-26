@@ -153,7 +153,7 @@ async function sendAgentReply(
   if (agent.voiceReplies && opts.platform === "WHATSAPP" && opts.sendVoiceReply) {
     const audio = await synthesizeVoiceReply(
       body,
-      await resolveAiConfig(opts.workspaceId)
+      await resolveAiConfig()
     );
     if (audio) {
       try {
@@ -497,8 +497,8 @@ async function runPipeline(
           ]
         : []),
     ];
-    // إعدادات الذكاء الاصطناعي من إعدادات مساحة العمل مع .env كبديل
-    const aiConfig = await resolveAiConfig(workspaceId);
+    // إعدادات الذكاء الاصطناعي من لوحة مالك المنصة — موحّدة لكل المساحات
+    const aiConfig = await resolveAiConfig();
     // برومبت النظام الكامل: الأساس + أقسام التعليمات + سلوكيات المهارات
     const systemPrompt = buildAgentSystemPrompt(agent);
     // أدوات المهارات المفعّلة — بلا مهارات يكون النداء الاعتيادي بلا أدوات
@@ -751,12 +751,8 @@ export async function handleIncomingWhatsAppMessage(input: {
       waCreds?.provider === "meta"
     ) {
       try {
-        const [aiConfig, provider, configuredModel] = await Promise.all([
-          resolveAiConfig(workspaceId),
-          getIntegration(workspaceId, "AI_PROVIDER"),
-          getIntegration(workspaceId, "AI_MODEL"),
-        ]);
-        const transcriptionProvider = provider ?? "openai";
+        const aiConfig = await resolveAiConfig();
+        const transcriptionProvider = aiConfig.provider;
         if (transcriptionProvider !== "openai" && transcriptionProvider !== "gemini") {
           throw new Error(
             `تفريغ الرسائل الصوتية غير مدعوم لمزوّد الذكاء الاصطناعي "${transcriptionProvider}"`
@@ -773,7 +769,7 @@ export async function handleIncomingWhatsAppMessage(input: {
           model:
             transcriptionProvider === "openai"
               ? "whisper-1"
-              : configuredModel || aiConfig.model,
+              : aiConfig.model,
         });
         const caption = text === "[رسالة صوتية]" ? "" : text.trim();
         text = [caption, transcript].filter(Boolean).join("\n\n");

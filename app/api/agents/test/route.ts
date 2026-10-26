@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     }
   }
 
-  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const aiConfig = await resolveAiConfig();
   const tools = skills.length > 0 ? toolsForSkills(skills) : undefined;
   const conversationMessages: ChatMessage[] = [...messages];
 

@@ -149,11 +149,25 @@ export function stepId(step: WorkflowStep): string | undefined {
 
 // إعدادات المحفّز حسب نوعه
 export type TriggerConfig =
-  | { keywords: string[] } // KEYWORD
+  | { keywords: string[] } // KEYWORD أو SHORTCUT
   | { phones: string[] } // FROM_NUMBERS
-  | Record<string, never> // NEW_CONTACT
+  | Record<string, never> // NEW_CONTACT / CONVERSATION_OPENED / CONVERSATION_CLOSED
   | { fromStage?: string; toStage: string } // STAGE_CHANGE
-  | { hours: number }; // NO_REPLY — ساعات صمت العميل قبل التشغيل
+  | { hours: number } // NO_REPLY — ساعات صمت العميل قبل التشغيل
+  | { field?: string } // CONTACT_FIELD_UPDATED — الحقل المتغير (name/email/phone/notes)
+  | { tag?: string }; // CONTACT_TAG_UPDATED — الوسم المضاف
+
+// أسماء محفّزات يمكن إطلاقها عبر triggerWorkflows — WEBHOOK وMANUAL يُشغَّلان مباشرة
+export type TriggerWorkflowsTrigger =
+  | "KEYWORD"
+  | "FROM_NUMBERS"
+  | "NEW_CONTACT"
+  | "STAGE_CHANGE"
+  | "SHORTCUT"
+  | "CONVERSATION_OPENED"
+  | "CONVERSATION_CLOSED"
+  | "CONTACT_FIELD_UPDATED"
+  | "CONTACT_TAG_UPDATED";
 
 // سياق التشغيل: بيانات العميل والمحادثة التي أطلقت المحفّز
 export type WorkflowContext = {
@@ -880,7 +894,7 @@ async function runAiReply(ctx: WorkflowContext): Promise<void> {
     ctx.text,
     ctx.waPhone
   );
-  const aiConfig = await resolveAiConfig(ctx.workspaceId);
+  const aiConfig = await resolveAiConfig();
   const result = await generateWorkspaceReply(
     ctx.workspaceId,
     history,
@@ -1182,7 +1196,7 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
     }
     case "AI_CLASSIFY": {
       const options = step.options.map((o) => o.trim()).filter(Boolean);
-      const aiConfig = await resolveAiConfig(ctx.workspaceId);
+      const aiConfig = await resolveAiConfig();
       const systemPrompt = [
         step.prompt?.trim() || "صنّف نص العميل التالي إلى واحد من الخيارات التالية.",
         `الخيارات: ${options.join(" | ")}`,
@@ -1391,7 +1405,8 @@ function workflowMatches(
   if (workflow.trigger !== trigger) return false;
   const tc = (workflow.triggerConfig ?? {}) as Record<string, unknown>;
   switch (trigger) {
-    case "KEYWORD": {
+    case "KEYWORD":
+    case "SHORTCUT": {
       const keywords = Array.isArray(tc.keywords) ? tc.keywords : [];
       const text = ctx.text.toLowerCase();
       return keywords.some(
@@ -1405,7 +1420,21 @@ function workflowMatches(
       );
     }
     case "NEW_CONTACT":
+    case "CONVERSATION_OPENED":
+    case "CONVERSATION_CLOSED":
       return true;
+    case "CONTACT_FIELD_UPDATED": {
+      const wanted = tc.field;
+      if (typeof wanted !== "string" || !wanted) return true; // بلا فلتر: أي حقل
+      const change = config as { field?: string };
+      return wanted === change.field;
+    }
+    case "CONTACT_TAG_UPDATED": {
+      const wanted = tc.tag;
+      if (typeof wanted !== "string" || !wanted) return true; // بلا فلتر: أي وسم
+      const change = config as { tag?: string };
+      return wanted === change.tag;
+    }
     case "STAGE_CHANGE": {
       const to = tc.toStage;
       const from = tc.fromStage;
@@ -1423,7 +1452,7 @@ function workflowMatches(
 // نستخدمها في مسار الرسائل الواردة وفي تغيير حالة العميل
 export async function triggerWorkflows(
   workspaceId: string,
-  trigger: "KEYWORD" | "FROM_NUMBERS" | "NEW_CONTACT" | "STAGE_CHANGE",
+  trigger: TriggerWorkflowsTrigger,
   config: TriggerConfig,
   ctx: WorkflowContext
 ): Promise<void> {
@@ -1534,4 +1563,56 @@ export async function resumeWaitingWorkflowRuns(): Promise<number> {
     await executeWorkflow(run.workflow, ctx, run.pendingSteps, run.id);
   }
   return runs.length;
+}
+
+// تشغيل سير عمل مباشرة لجهة اتصال محددة برقمها — يستخدمه محفّزا WEBHOOK وMANUAL:
+// يستخرج/ينشئ جهة الاتصال ومحادثة مفتوحة ثم ينفّذ خطوات السير عليها
+export async function runWorkflowForPhone(
+  workflow: {
+    id: string;
+    name: string;
+    steps: unknown;
+    workspaceId: string;
+  },
+  input: { phone: string; name?: string | null; text?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const digits = input.phone.replace(/\D/g, "").replace(/^00/, "");
+  if (!digits) return { ok: false, error: "رقم الهاتف مطلوب" };
+
+  const existing = await prisma.contact.findUnique({
+    where: { workspaceId_waPhone: { workspaceId: workflow.workspaceId, waPhone: digits } },
+    select: { name: true },
+  });
+  const contact = await prisma.contact.upsert({
+    where: { workspaceId_waPhone: { workspaceId: workflow.workspaceId, waPhone: digits } },
+    update:
+      input.name && !existing?.name ? { name: input.name } : {},
+    create: { workspaceId: workflow.workspaceId, waPhone: digits, name: input.name ?? null },
+  });
+
+  let conversation = await prisma.conversation.findFirst({
+    where: { contactId: contact.id, platform: "WHATSAPP", isArchived: false },
+  });
+  if (!conversation) {
+    conversation = await prisma.conversation.create({
+      data: {
+        workspaceId: workflow.workspaceId,
+        contactId: contact.id,
+        platform: "WHATSAPP",
+        status: "MANUAL",
+      },
+    });
+  }
+
+  const ctx: WorkflowContext = {
+    workspaceId: workflow.workspaceId,
+    contactId: contact.id,
+    waPhone: contact.waPhone,
+    contactName: contact.name,
+    text: input.text ?? "",
+    conversationId: conversation.id,
+    vars: {},
+  };
+  await executeWorkflow(workflow, ctx);
+  return { ok: true };
 }

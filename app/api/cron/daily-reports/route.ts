@@ -140,7 +140,7 @@ async function createDailyReport(
     })
     .join("\n\n");
 
-  const config = await resolveAiConfig(workspaceId);
+  const config = await resolveAiConfig();
   const result = await generateWorkspaceReply(
     workspaceId,
     [

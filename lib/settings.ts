@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { decryptSecret } from "@/lib/secret-crypto";
 
 // مفاتيح التكامل المدعومة — القيمة من قاعدة البيانات أولاً، ثم .env كبديل
 // مفاتيح الذكاء الاصطناعي مقصورة على مالك المنصة من لوحة /admin (راجع lib/platform-config.ts)
@@ -67,6 +68,27 @@ const NON_SECRET = new Set<string>([
 
 const KEY_SET = new Set<string>(INTEGRATION_KEYS.map((d) => d.key));
 
+export function isSecretIntegrationKey(key: IntegrationKey): boolean {
+  return !NON_SECRET.has(key);
+}
+
+export function integrationSecretContext(
+  workspaceId: string,
+  key: IntegrationKey
+): string {
+  return `workspace:${workspaceId}:integration:${key}`;
+}
+
+function readStoredValue(
+  workspaceId: string,
+  key: IntegrationKey,
+  value: string
+): string {
+  return isSecretIntegrationKey(key)
+    ? decryptSecret(value, integrationSecretContext(workspaceId, key))
+    : value;
+}
+
 export function isIntegrationKey(key: string): key is IntegrationKey {
   return KEY_SET.has(key);
 }
@@ -91,7 +113,7 @@ export async function getIntegration(
   const row = await prisma.setting.findUnique({
     where: { workspaceId_key: { workspaceId, key } },
   });
-  if (row?.value) return row.value;
+  if (row?.value) return readStoredValue(workspaceId, key, row.value);
   return envFallback(def);
 }
 
@@ -103,7 +125,11 @@ export async function getIntegrationCandidates(key: IntegrationKey): Promise<str
   const envVal = await envFallback(def);
   if (envVal) values.add(envVal);
   const rows = await prisma.setting.findMany({ where: { key } });
-  for (const r of rows) if (r.value) values.add(r.value);
+  for (const r of rows) {
+    if (r.value && isIntegrationKey(r.key)) {
+      values.add(readStoredValue(r.workspaceId, r.key, r.value));
+    }
+  }
   return [...values];
 }
 
@@ -112,11 +138,24 @@ export async function getIntegrationCandidates(key: IntegrationKey): Promise<str
 export async function resolveWorkspaceByPhoneNumberId(
   phoneNumberId: string
 ): Promise<string | null> {
-  const row = await prisma.setting.findFirst({
-    where: { key: "WHATSAPP_PHONE_NUMBER_ID", value: phoneNumberId },
-    select: { workspaceId: true },
+  const rows = await prisma.setting.findMany({
+    where: { key: "WHATSAPP_PHONE_NUMBER_ID" },
+    select: { workspaceId: true, value: true },
   });
-  return row?.workspaceId ?? null;
+  for (const row of rows) {
+    if (!row.value) continue;
+    try {
+      if (
+        readStoredValue(row.workspaceId, "WHATSAPP_PHONE_NUMBER_ID", row.value) ===
+        phoneNumberId
+      ) {
+        return row.workspaceId;
+      }
+    } catch (error) {
+      console.error("[settings] تعذر فك معرف رقم واتساب:", error);
+    }
+  }
+  return null;
 }
 
 // حل مساحة العمل المالكة لمعرّف نسخة UltraMsg —
@@ -124,11 +163,24 @@ export async function resolveWorkspaceByPhoneNumberId(
 export async function resolveWorkspaceByUltraMsgInstance(
   instanceId: string
 ): Promise<string | null> {
-  const row = await prisma.setting.findFirst({
-    where: { key: "ULTRAMSG_INSTANCE_ID", value: instanceId },
-    select: { workspaceId: true },
+  const rows = await prisma.setting.findMany({
+    where: { key: "ULTRAMSG_INSTANCE_ID" },
+    select: { workspaceId: true, value: true },
   });
-  return row?.workspaceId ?? null;
+  for (const row of rows) {
+    if (!row.value) continue;
+    try {
+      if (
+        readStoredValue(row.workspaceId, "ULTRAMSG_INSTANCE_ID", row.value) ===
+        instanceId
+      ) {
+        return row.workspaceId;
+      }
+    } catch (error) {
+      console.error("[settings] تعذر فك معرف نسخة UltraMsg:", error);
+    }
+  }
+  return null;
 }
 
 // إخفاء السر — نظهر آخر ٤ أحرف فقط
@@ -159,7 +211,9 @@ export async function getIntegrationList(
     INTEGRATION_KEYS.map(async (def) => {
       const secret = !NON_SECRET.has(def.key);
       const row = rows.find((r) => r.key === def.key);
-      const raw = row?.value || (await envFallback(def));
+      const raw = row?.value
+        ? readStoredValue(workspaceId, def.key, row.value)
+        : await envFallback(def);
       const source = row?.value ? "db" : raw ? "env" : null;
       return {
         key: def.key,

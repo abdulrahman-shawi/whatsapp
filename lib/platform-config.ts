@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { decryptSecret } from "@/lib/secret-crypto";
 
 // إعدادات مالك المنصة — تُدار من لوحة /admin وتتقدّم على متغيرات البيئة
 export const PLATFORM_CONFIG_KEYS = [
@@ -15,7 +16,22 @@ export const PLATFORM_CONFIG_KEYS = [
   "AI_BASE_URL",
 ] as const;
 
-export type PlatformConfig = Record<(typeof PLATFORM_CONFIG_KEYS)[number], string>;
+export type PlatformConfigKey = (typeof PLATFORM_CONFIG_KEYS)[number];
+export type PlatformConfig = Record<PlatformConfigKey, string>;
+
+const SECRET_KEYS = new Set<PlatformConfigKey>([
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "OPENAI_API_KEY",
+]);
+
+export function isSecretPlatformKey(key: PlatformConfigKey): boolean {
+  return SECRET_KEYS.has(key);
+}
+
+export function platformSecretContext(key: PlatformConfigKey): string {
+  return `platform:${key}`;
+}
 
 const ENV_FALLBACK: PlatformConfig = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? "",
@@ -41,7 +57,15 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
   });
   const fromDb = new Map(rows.map((r) => [r.key, r.value]));
   const config = Object.fromEntries(
-    PLATFORM_CONFIG_KEYS.map((k) => [k, fromDb.get(k)?.trim() || ENV_FALLBACK[k]])
+    PLATFORM_CONFIG_KEYS.map((k) => {
+      const stored = fromDb.get(k)?.trim();
+      const value = stored
+        ? isSecretPlatformKey(k)
+          ? decryptSecret(stored, platformSecretContext(k))
+          : stored
+        : ENV_FALLBACK[k];
+      return [k, value];
+    })
   ) as PlatformConfig;
   cache = { at: Date.now(), config };
   return config;

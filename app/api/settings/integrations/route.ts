@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { getIntegrationList, isIntegrationKey } from "@/lib/settings";
+import {
+  getIntegrationList,
+  integrationSecretContext,
+  isIntegrationKey,
+  isSecretIntegrationKey,
+} from "@/lib/settings";
+import { encryptSecret } from "@/lib/secret-crypto";
 import { logAudit } from "@/lib/audit";
 
 // قائمة مفاتيح التكامل مقنّعة مع مصدر كل منها
@@ -78,10 +84,16 @@ export async function PUT(req: Request) {
         where: { workspaceId: ctx.workspaceId, key },
       });
     } else {
+      const storedValue = isSecretIntegrationKey(key)
+        ? encryptSecret(
+            normalizedValue,
+            integrationSecretContext(ctx.workspaceId, key)
+          )
+        : normalizedValue;
       await prisma.setting.upsert({
         where: { workspaceId_key: { workspaceId: ctx.workspaceId, key } },
-        update: { value: normalizedValue },
-        create: { workspaceId: ctx.workspaceId, key, value: normalizedValue },
+        update: { value: storedValue },
+        create: { workspaceId: ctx.workspaceId, key, value: storedValue },
       });
     }
   }

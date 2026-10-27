@@ -6,8 +6,11 @@ import {
   PLATFORM_CONFIG_KEYS,
   getPlatformConfig,
   invalidatePlatformConfigCache,
+  isSecretPlatformKey,
   maskSecret,
+  platformSecretContext,
 } from "@/lib/platform-config";
+import { encryptSecret } from "@/lib/secret-crypto";
 
 // بريدات مالك المنصة من .env — مفصولة بفواصل
 function adminEmails(): string[] {
@@ -34,17 +37,11 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "مدير المنصة فقط" }, { status: 403 });
 
   const config = await getPlatformConfig();
-  // الحقول غير السرية تُعرض كاملة (قائمة مزود، نموذج، رابط) — السرية مقنّعة دائماً
-  const NON_SECRET = new Set<string>([
-    "SUPPORT_WHATSAPP",
-    "AI_PROVIDER",
-    "AI_MODEL",
-    "AI_BASE_URL",
-  ]);
+  // الأسرار وحدها تُقنّع؛ إعدادات النموذج والأسعار وروابط الدعم ليست أسراراً.
   const masked = Object.fromEntries(
     PLATFORM_CONFIG_KEYS.map((k) => [
       k,
-      NON_SECRET.has(k) ? config[k] : maskSecret(config[k]),
+      isSecretPlatformKey(k) ? maskSecret(config[k]) : config[k],
     ])
   );
   return NextResponse.json({ config: masked });
@@ -91,10 +88,17 @@ export async function PUT(req: Request) {
   }
 
   for (const { key, value } of updates) {
+    if (!PLATFORM_CONFIG_KEYS.includes(key as (typeof PLATFORM_CONFIG_KEYS)[number])) {
+      return NextResponse.json({ error: "مفتاح غير معروف" }, { status: 400 });
+    }
+    const configKey = key as (typeof PLATFORM_CONFIG_KEYS)[number];
+    const storedValue = isSecretPlatformKey(configKey)
+      ? encryptSecret(value, platformSecretContext(configKey))
+      : value;
     await prisma.platformSetting.upsert({
       where: { key },
-      update: { value },
-      create: { key, value },
+      update: { value: storedValue },
+      create: { key, value: storedValue },
     });
   }
   for (const key of removals) {

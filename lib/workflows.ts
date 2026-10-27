@@ -8,8 +8,8 @@ import {
   sendWhatsAppLocationRequest,
   uploadWhatsAppMedia,
   mediaTypeForMime,
-  getLastWhatsAppError,
 } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { resolveAiConfig, type ChatMessage } from "@/lib/openai";
 import { generateWorkspaceReply } from "@/lib/billing/ai-usage";
 import { saveMediaAsset } from "@/lib/assets";
@@ -553,12 +553,18 @@ async function sendWorkflowMessage(
     throw new Error("انتهت التجربة المجانية؛ مساحة العمل للقراءة فقط");
   }
   const creds = await resolveWhatsAppCreds(ctx.workspaceId);
-  const sent = templateId
+  const result = templateId
     ? await (async () => {
         const template = await prisma.template.findFirst({
           where: { id: templateId, workspaceId: ctx.workspaceId },
         });
-        if (!template) return false;
+        if (!template) {
+          return {
+            ok: false as const,
+            messageId: null,
+            error: "القالب غير موجود في مساحة العمل",
+          };
+        }
         return sendWhatsAppTemplate(
           ctx.waPhone,
           { name: template.name, language: template.language, params: [] },
@@ -574,6 +580,7 @@ async function sendWorkflowMessage(
         direction: "OUTBOUND",
         senderType: "HUMAN",
         body: templateId ? "[قالب] " + personalize(body, ctx) : personalize(body, ctx),
+        ...outboundDeliveryFields(result),
       },
     });
     await prisma.conversation.update({
@@ -581,11 +588,8 @@ async function sendWorkflowMessage(
       data: { lastMessageAt: new Date() },
     });
   }
-  if (!sent) {
-    const detail = getLastWhatsAppError();
-    throw new Error(
-      "فشل إرسال الرسالة عبر مزود واتساب" + (detail ? ` — ${detail}` : "")
-    );
+  if (!result.ok) {
+    throw new Error(result.error ?? "فشل إرسال الرسالة عبر مزود واتساب");
   }
 }
 
@@ -643,32 +647,28 @@ async function sendWorkflowMedia(
 
   const mediaType = mediaTypeForMime(mime);
 
-  let sent: boolean;
+  let providerMediaId: string | null = null;
   if (creds.provider === "meta") {
-    const mediaId = await uploadWhatsAppMedia({ buffer, mime, filename }, creds);
-    if (!mediaId) {
-      const detail = getLastWhatsAppError();
-      throw new Error(
-        "فشل رفع الوسائط إلى ميتا" + (detail ? ` — ${detail}` : "")
-      );
+    const upload = await uploadWhatsAppMedia({ buffer, mime, filename }, creds);
+    if (!upload.mediaId) {
+      throw new Error(upload.error ?? "فشل رفع الوسائط إلى ميتا");
     }
-    sent = await sendWhatsAppMedia(
-      ctx.waPhone,
-      { mediaId, mediaType, mime, filename, caption },
-      creds
-    );
-  } else {
-    sent = await sendWhatsAppMedia(
-      ctx.waPhone,
-      { mediaId: "", mediaType, mime, filename, caption, buffer },
-      creds
-    );
+    providerMediaId = upload.mediaId;
   }
-  if (!sent) {
-    const detail = getLastWhatsAppError();
-    throw new Error(
-      "فشل إرسال الوسائط عبر المزود" + (detail ? ` — ${detail}` : "")
-    );
+  const result = await sendWhatsAppMedia(
+    ctx.waPhone,
+    {
+      mediaId: providerMediaId ?? "",
+      mediaType,
+      mime,
+      filename,
+      caption,
+      ...(creds.provider === "ultramsg" ? { buffer } : {}),
+    },
+    creds
+  );
+  if (!result.ok) {
+    throw new Error(result.error ?? "فشل إرسال الوسائط عبر المزود");
   }
 
   if (ctx.conversationId) {
@@ -694,6 +694,7 @@ async function sendWorkflowMedia(
         mediaId: displayMediaId,
         mediaMime: mime,
         mediaType,
+        ...outboundDeliveryFields(result),
       },
     });
     await prisma.conversation.update({
@@ -940,17 +941,11 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
       if (creds.provider !== "meta") {
         throw new Error("طلب الموقع متاح مع مزود ميتا فقط");
       }
-      const sent = await sendWhatsAppLocationRequest(
+      const result = await sendWhatsAppLocationRequest(
         ctx.waPhone,
         personalize(step.prompt ?? "يرجى مشاركة موقعك لإتمام الطلب", ctx),
         creds
       );
-      if (!sent) {
-        const detail = getLastWhatsAppError();
-        throw new Error(
-          "فشل إرسال طلب الموقع" + (detail ? ` — ${detail}` : "")
-        );
-      }
       if (ctx.conversationId) {
         await prisma.message.create({
           data: {
@@ -958,8 +953,12 @@ async function executeStep(step: WorkflowStep, ctx: WorkflowContext): Promise<st
             direction: "OUTBOUND",
             senderType: "HUMAN",
             body: "[طلب موقع] " + (step.prompt ?? ""),
+            ...outboundDeliveryFields(result),
           },
         });
+      }
+      if (!result.ok) {
+        throw new Error(result.error ?? "فشل إرسال طلب الموقع");
       }
       return "أُرسل طلب الموقع";
     }

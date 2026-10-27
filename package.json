@@ -13,7 +13,8 @@
     "test:e2e:ui": "playwright test --ui",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:encrypt-secrets": "tsx scripts/encrypt-existing-secrets.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

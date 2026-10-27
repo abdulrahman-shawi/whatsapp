@@ -284,21 +284,21 @@ model KnowledgeSource {
 }
 
 model Contact {
-  id            String                @id @default(cuid())
-  workspaceId   String
-  waPhone       String
-  name          String?
-  notes         String?
-  tags          String[]
-  createdAt     DateTime              @default(now())
-  stage         ContactStage          @default(NEW)
-  blocked       Boolean               @default(false)
-  leadScore     Int                   @default(0)
-  email         String?
-  bookings      Booking[]
-  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  stageHistory  ContactStageHistory[]
-  conversations Conversation[]
+  id                  String                      @id @default(cuid())
+  workspaceId         String
+  waPhone             String
+  name                String?
+  notes               String?
+  tags                String[]
+  createdAt           DateTime                    @default(now())
+  stage               ContactStage                @default(NEW)
+  blocked             Boolean                     @default(false)
+  leadScore           Int                         @default(0)
+  email               String?
+  bookings            Booking[]
+  workspace           Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  stageHistory        ContactStageHistory[]
+  conversations       Conversation[]
   workflowActivations WorkflowContactActivation[]
 
   @@unique([workspaceId, waPhone])
@@ -385,21 +385,25 @@ model ScheduledMessage {
 }
 
 model Message {
-  id             String           @id @default(cuid())
-  conversationId String
-  direction      MessageDirection
-  body           String
-  senderType     SenderType
-  isRead         Boolean          @default(false)
-  createdAt      DateTime         @default(now())
-  rating         String?
-  isNote         Boolean          @default(false)
-  senderId       String?
-  mediaId        String?
-  mediaMime      String?
-  mediaType      String?
-  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User?            @relation(fields: [senderId], references: [id])
+  id              String                @id @default(cuid())
+  conversationId  String
+  direction       MessageDirection
+  body            String
+  senderType      SenderType
+  isRead          Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  rating          String?
+  isNote          Boolean               @default(false)
+  senderId        String?
+  mediaId         String?
+  mediaMime       String?
+  mediaType       String?
+  waMessageId     String?               @unique
+  deliveryStatus  MessageDeliveryStatus @default(PENDING)
+  deliveryError   String?
+  statusUpdatedAt DateTime?
+  conversation    Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User?                 @relation(fields: [senderId], references: [id])
 }
 
 model UsageRecord {
@@ -430,20 +434,20 @@ model PlatformSetting {
 }
 
 model Workflow {
-  id            String          @id @default(cuid())
-  workspaceId   String
-  name          String
-  trigger       WorkflowTrigger
-  triggerConfig Json            @default("{}")
-  steps         Json            @default("[]")
-  isActive      Boolean         @default(true)
-  createdById   String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  hookToken     String?         @unique
-  createdBy     User?           @relation(fields: [createdById], references: [id])
-  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  runs          WorkflowRun[]
+  id                 String                      @id @default(cuid())
+  workspaceId        String
+  name               String
+  trigger            WorkflowTrigger
+  triggerConfig      Json                        @default("{}")
+  steps              Json                        @default("[]")
+  isActive           Boolean                     @default(true)
+  createdById        String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  hookToken          String?                     @unique
+  createdBy          User?                       @relation(fields: [createdById], references: [id])
+  workspace          Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs               WorkflowRun[]
   contactActivations WorkflowContactActivation[]
 }
 
@@ -517,6 +521,25 @@ model Template {
   body        String
   createdAt   DateTime  @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  provider    String
+  externalId  String
+  workspaceId String?
+  payload     Json
+  status      WebhookEventStatus @default(PENDING)
+  attempts    Int                @default(0)
+  availableAt DateTime           @default(now())
+  lockedAt    DateTime?
+  lastError   String?
+  createdAt   DateTime           @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, externalId])
+  @@index([status, availableAt, createdAt])
+  @@index([workspaceId, createdAt])
 }
 
 enum MemberRole {
@@ -597,4 +620,21 @@ enum WorkflowTrigger {
   INCOMING_WEBHOOK
   CLICK_TO_CHAT_AD
   MANUAL
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSING
+  RETRY
+  PROCESSED
+  FAILED
+}
+
+enum MessageDeliveryStatus {
+  PENDING
+  ACCEPTED
+  SENT
+  DELIVERED
+  READ
+  FAILED
 }

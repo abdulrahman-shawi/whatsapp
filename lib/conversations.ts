@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { resolveWhatsAppCreds, sendWhatsAppMessage, getLastWhatsAppError } from "@/lib/whatsapp";
+import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { recalculateLeadScore } from "@/lib/scoring";
 import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
@@ -165,14 +166,13 @@ export async function sendDueScheduledMessages(): Promise<{
       if (await workspaceIsReadOnly(item.workspaceId)) continue;
       const creds = await resolveWhatsAppCreds(item.workspaceId);
       if (!creds) throw new Error("لا يوجد مزود واتساب مُعدّ");
-      const ok = await sendWhatsAppMessage(
+      const result = await sendWhatsAppMessage(
         item.conversation.contact.waPhone,
         item.body,
         creds
       );
-      if (!ok) {
-        const detail = getLastWhatsAppError();
-        throw new Error("فشل الإرسال عبر المزود" + (detail ? ` — ${detail}` : ""));
+      if (!result.ok) {
+        throw new Error(result.error ?? "فشل الإرسال عبر المزود");
       }
 
       const message = await prisma.message.create({
@@ -181,6 +181,7 @@ export async function sendDueScheduledMessages(): Promise<{
           direction: "OUTBOUND",
           senderType: "HUMAN",
           body: item.body,
+          ...outboundDeliveryFields(result),
         },
       });
       await prisma.conversation.update({

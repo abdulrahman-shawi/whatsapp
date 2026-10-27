@@ -1,4 +1,4 @@
-const META_GRAPH_API = "https://graph.facebook.com/v21.0";
+import { metaGraphUrl } from "@/lib/meta-graph";
 const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 25_000;
 
@@ -36,7 +36,7 @@ export async function downloadMetaAudio(
   }
 
   const metadataResponse = await fetch(
-    `${META_GRAPH_API}/${encodeURIComponent(mediaId)}`,
+    metaGraphUrl(encodeURIComponent(mediaId)),
     {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

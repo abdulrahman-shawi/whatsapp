@@ -26,8 +26,8 @@ export async function sendBookingReminders(): Promise<number> {
         minute: "2-digit",
       }).format(booking.scheduledAt);
       const body = `تذكير بموعدك "${booking.title}" اليوم الساعة ${time}. نراك قريباً!`;
-      const ok = await sendWhatsAppMessage(booking.contact.waPhone, body, creds);
-      if (!ok) throw new Error("رفض المزود الإرسال");
+      const result = await sendWhatsAppMessage(booking.contact.waPhone, body, creds);
+      if (!result.ok) throw new Error(result.error ?? "رفض المزود الإرسال");
       await prisma.booking.update({
         where: { id: booking.id },
         data: { remindedAt: new Date() },

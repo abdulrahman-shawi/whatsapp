@@ -9,7 +9,9 @@ import {
   sendWhatsAppMessage,
   uploadWhatsAppMedia,
   type WhatsAppCreds,
+  type WhatsAppResult,
 } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { collectAgentKnowledge } from "@/lib/retrieval";
 import { buildAgentSystemPrompt, parseSkills } from "@/lib/agent-prompt";
 import { toolsForSkills } from "@/lib/agent-skills";
@@ -138,6 +140,7 @@ type PipelineOptions = {
   waPhone: string;
   contactName: string | null;
   text: string;
+  waMessageId?: string;
   platform: "WHATSAPP" | "WIDGET";
   conversationId?: string;
   referral?: {
@@ -149,11 +152,11 @@ type PipelineOptions = {
     clickId?: string;
   };
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
-  sendReply: (to: string, body: string) => Promise<unknown>;
+  sendReply: (to: string, body: string) => Promise<WhatsAppResult>;
   sendVoiceReply?: (
     to: string,
     audio: Buffer
-  ) => Promise<{ sent: boolean; mediaId: string | null }>;
+  ) => Promise<{ result: WhatsAppResult; mediaId: string | null }>;
 };
 
 async function sendAgentReply(
@@ -161,7 +164,11 @@ async function sendAgentReply(
   agent: AgentWithKnowledge,
   to: string,
   body: string
-): Promise<{ voiceSent: boolean; mediaId: string | null }> {
+): Promise<{
+  voiceSent: boolean;
+  mediaId: string | null;
+  result: WhatsAppResult;
+}> {
   if (agent.voiceReplies && opts.platform === "WHATSAPP" && opts.sendVoiceReply) {
     const audio = await synthesizeVoiceReply(
       body,
@@ -169,16 +176,21 @@ async function sendAgentReply(
     );
     if (audio) {
       try {
-        const result = await opts.sendVoiceReply(to, audio);
-        if (result.sent) return { voiceSent: true, mediaId: result.mediaId };
-        console.error("[agent-engine] فشل إرسال الرد الصوتي؛ سيُرسل كنص");
+        const voice = await opts.sendVoiceReply(to, audio);
+        if (voice.result.ok) {
+          return { voiceSent: true, mediaId: voice.mediaId, result: voice.result };
+        }
+        console.error(
+          "[agent-engine] فشل إرسال الرد الصوتي؛ سيُرسل كنص:",
+          voice.result.error
+        );
       } catch (error) {
         console.error("[agent-engine] تعذّر إرسال الرد الصوتي؛ سيُرسل كنص:", error);
       }
     }
   }
-  await opts.sendReply(to, body);
-  return { voiceSent: false, mediaId: null };
+  const result = await opts.sendReply(to, body);
+  return { voiceSent: false, mediaId: null, result };
 }
 
 // خط معالجة الرسالة الواردة المشترك بين واتساب والويدجت
@@ -247,6 +259,7 @@ async function runPipeline(
       direction: "INBOUND",
       senderType: "CUSTOMER",
       body: text,
+      waMessageId: opts.waMessageId ?? null,
       // وسائط واتساب الواردة: معرّف وسيط ميتا ونوعه وصيغته
       ...(opts.media
         ? {
@@ -316,15 +329,19 @@ async function runPipeline(
     });
     const thanksText = "شكراً لتقييمك! نقدّر ثقتك 🌟";
     try {
-      await opts.sendReply(waPhone, thanksText);
+      const result = await opts.sendReply(waPhone, thanksText);
       await prisma.message.create({
         data: {
           conversationId: conversation.id,
           direction: "OUTBOUND",
           senderType: "AI",
           body: thanksText,
+          ...(platform === "WHATSAPP" ? outboundDeliveryFields(result) : {}),
         },
       });
+      if (!result.ok) {
+        console.error("[agent-engine] فشل إرسال شكر التقييم:", result.error);
+      }
       console.log(`[agent-engine] تسجيل تقييم رضا ${ratingNum}/٥ للمحادثة ${conversation.id}`);
     } catch (e) {
       console.error(
@@ -471,13 +488,16 @@ async function runPipeline(
                 mediaMime: "audio/ogg; codecs=opus",
               }
             : {}),
+          ...(platform === "WHATSAPP"
+            ? outboundDeliveryFields(delivery.result)
+            : {}),
         },
       });
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { lastMessageAt: new Date() },
       });
-      await incrementUsage(workspaceId);
+      if (delivery.result.ok) await incrementUsage(workspaceId);
       triggerNewMessage(workspaceId, conversation.id, replyMsg);
       triggerConversationUpdated(workspaceId, conversation.id);
       return {
@@ -622,13 +642,16 @@ async function runPipeline(
             mediaMime: "audio/ogg; codecs=opus",
           }
         : {}),
+      ...(platform === "WHATSAPP"
+        ? outboundDeliveryFields(delivery.result)
+        : {}),
     },
   });
   await prisma.conversation.update({
     where: { id: conversation.id },
     data: { lastMessageAt: new Date() },
   });
-  await incrementUsage(workspaceId);
+  if (delivery.result.ok) await incrementUsage(workspaceId);
 
   // بث الرد الآلي لصندوق الوارد فورياً
   triggerNewMessage(workspaceId, conversation.id, replyMsg);
@@ -647,20 +670,11 @@ async function storeInboundWithoutAgent(input: {
   waPhone: string;
   contactName: string | null;
   text: string;
-  workspaceId?: string;
+  waMessageId?: string;
+  workspaceId: string;
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
 }): Promise<void> {
-  // Multi-tenant: نستخدم مساحة العمل المحلولة من رقم الهاتف،
-  // وإن تعذّرت نعود لأول مساحة عمل (سلوك احتياطي قديم)
-  let workspaceId = input.workspaceId;
-  if (!workspaceId) {
-    const workspace = await prisma.workspace.findFirst();
-    if (!workspace) {
-      console.log("[agent-engine] لا توجد مساحة عمل — تم تجاهل الرسالة");
-      return;
-    }
-    workspaceId = workspace.id;
-  }
+  const workspaceId = input.workspaceId;
 
   // لا نستبدل اسماً موجوداً — الاسم المعدل يدوياً أو المسجل سابقاً له الأولوية
   const existingForName = await prisma.contact.findFirst({
@@ -704,6 +718,7 @@ async function storeInboundWithoutAgent(input: {
       direction: "INBOUND",
       senderType: "CUSTOMER",
       body: input.text,
+      waMessageId: input.waMessageId ?? null,
       // وسائط واتساب الواردة: معرّف وسيط ميتا ونوعه وصيغته
       ...(input.media
         ? {
@@ -777,15 +792,25 @@ export async function handleIncomingWhatsAppMessage(input: {
   waPhone: string;
   contactName: string | null;
   text: string;
-  // مساحة العمل المحلولة من معرّف رقم الهاتف — غائبة في الاحتياط القديم
-  workspaceId?: string;
+  waMessageId?: string;
+  // مساحة العمل المحلولة من معرّف رقم الهاتف — إلزامية لمنع خلط المستأجرين
+  workspaceId: string;
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
   referral?: PipelineOptions["referral"];
 }): Promise<void> {
   try {
+    // منع تكرار الرسالة حتى لو أعاد المزود الحدث بمعرف طابور مختلف.
+    if (input.waMessageId) {
+      const existing = await prisma.message.findUnique({
+        where: { waMessageId: input.waMessageId },
+        select: { id: true },
+      });
+      if (existing) return;
+    }
+
     // رقم محظور — نتجاهل الرسالة تماماً: لا محادثة جديدة ولا رد آلي
     const blockedContact = await prisma.contact.findFirst({
-      where: { waPhone: input.waPhone, blocked: true },
+      where: { workspaceId: input.workspaceId, waPhone: input.waPhone, blocked: true },
       select: { id: true },
     });
     if (blockedContact) {
@@ -793,18 +818,12 @@ export async function handleIncomingWhatsAppMessage(input: {
       return;
     }
 
-    // Multi-tenant: نبحث عن الوكيل النشط داخل مساحة العمل المالكة للرقم،
-    // وعند غيابها نعود لأول وكيل نشط (سلوك احتياطي قديم)
-    const agent = input.workspaceId
-      ? await prisma.agent.findFirst({
-          where: { isActive: true, workspaceId: input.workspaceId },
-          include: { knowledgeSources: true },
-        })
-      : await prisma.agent.findFirst({
-          where: { isActive: true },
-          include: { knowledgeSources: true },
-        });
-    const workspaceId = input.workspaceId ?? agent?.workspaceId;
+    // لا يجوز اختيار وكيل من مساحة أخرى عند تعذر التوجيه.
+    const agent = await prisma.agent.findFirst({
+      where: { isActive: true, workspaceId: input.workspaceId },
+      include: { knowledgeSources: true },
+    });
+    const workspaceId = input.workspaceId;
     let text = input.text;
     let waCreds: WhatsAppCreds | null = null;
     if (workspaceId && input.media?.mediaType === "audio") {
@@ -847,11 +866,9 @@ export async function handleIncomingWhatsAppMessage(input: {
     }
 
     if (!agent) {
-      if (input.workspaceId) {
-        console.warn(
-          `[agent-engine] لا وكيل نشط في المساحة ${input.workspaceId} — تُخزن الرسالة يدوياً`
-        );
-      }
+      console.warn(
+        `[agent-engine] لا وكيل نشط في المساحة ${input.workspaceId} — تُخزن الرسالة يدوياً`
+      );
       // لا يوجد وكيل نشط — نحفظ الرسالة في صندوق الوارد دون رد آلي حتى لا تضيع
       await storeInboundWithoutAgent({ ...input, text });
       return;
@@ -867,23 +884,31 @@ export async function handleIncomingWhatsAppMessage(input: {
       waPhone: input.waPhone,
       contactName: input.contactName,
       text,
+      waMessageId: input.waMessageId,
       platform: "WHATSAPP",
       media: input.media,
       referral: input.referral,
       sendReply: (to, body) => sendWhatsAppMessage(to, body, waCreds),
       sendVoiceReply: async (to, audio) => {
         const mime = "audio/ogg; codecs=opus";
-        const mediaId = await uploadWhatsAppMedia(
+        const upload = await uploadWhatsAppMedia(
           { buffer: audio, mime, filename: "voice-reply.ogg" },
           waCreds
         );
-        if (waCreds?.provider === "meta" && !mediaId) {
-          return { sent: false, mediaId: null };
+        if (waCreds?.provider === "meta" && !upload.mediaId) {
+          return {
+            mediaId: null,
+            result: {
+              ok: false,
+              messageId: null,
+              error: upload.error ?? "فشل رفع الرد الصوتي",
+            },
+          };
         }
-        const sent = await sendWhatsAppMedia(
+        const result = await sendWhatsAppMedia(
           to,
           {
-            mediaId: mediaId ?? "",
+            mediaId: upload.mediaId ?? "",
             mediaType: "audio",
             mime,
             filename: "voice-reply.ogg",
@@ -892,12 +917,13 @@ export async function handleIncomingWhatsAppMessage(input: {
           },
           waCreds
         );
-        return { sent, mediaId: sent ? mediaId : null };
+        return { result, mediaId: result.ok ? upload.mediaId : null };
       },
     });
   } catch (e) {
-    // لا ندع الويب هوك يفشل أبداً — ميتا تعيد إرسال الحدث عند 5xx
+    // الخطأ يعود إلى عامل الطابور ليُعاد بأمان بدل فقدان الحدث.
     console.error("[agent-engine] خطأ في خط المعالجة:", e);
+    throw e;
   }
 }
 
@@ -934,7 +960,7 @@ export async function handleIncomingWidgetMessage(input: {
       text: input.text,
       platform: "WIDGET",
       conversationId: input.conversationId,
-      sendReply: async () => true,
+      sendReply: async () => ({ ok: true, messageId: null, error: null }),
     });
   } catch (e) {
     console.error("[agent-engine] خطأ في رسالة الويدجت:", e);

@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# منصة واتساب متعددة المساحات
 
-## Getting Started
+تطبيق Next.js لإدارة محادثات واتساب والوكلاء الذكيين وسير العمل. يدعم Meta WhatsApp Cloud API وUltraMsg، مع عزل كل مساحة عمل وبيانات اعتمادها.
 
-First, run the development server:
+## التشغيل محلياً
 
 ```bash
+npm install
+cp .env.example .env
+npx prisma migrate deploy
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ثم افتح `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## الإعدادات الإلزامية قبل الإنتاج
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `DATABASE_URL`: اتصال PostgreSQL.
+- `NEXTAUTH_SECRET` و`NEXTAUTH_URL`: جلسات المصادقة ورابط التطبيق.
+- `INTEGRATION_ENCRYPTION_KEY`: مفتاح AES-256 من 32 بايت بصيغة Base64. أنشئه بالأمر:
 
-## Learn More
+  ```bash
+  openssl rand -base64 32
+  ```
 
-To learn more about Next.js, take a look at the following resources:
+  احتفظ بنسخة احتياطية آمنة. فقدان المفتاح يجعل الأسرار المشفرة غير قابلة للقراءة، وتغييره دون ترحيل خاص يعطل قراءتها.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `CRON_SECRET`: يحمي مسارات المعالجة المجدولة.
+- عند استخدام Meta: `WHATSAPP_TOKEN` و`WHATSAPP_PHONE_NUMBER_ID` و`WHATSAPP_VERIFY_TOKEN` و`META_APP_SECRET`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+يمكن حفظ أسرار التكامل من لوحة الإعدادات لكل مساحة عمل. تُشفّر القيم الجديدة بـ AES-256-GCM ويرتبط كل سر بمساحة العمل ومفتاح التكامل المقصودين. لا تُرجع واجهة الإعدادات الأسرار الصريحة بعد حفظها.
 
-## Deploy on Vercel
+## ترحيل الأسرار القديمة
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+القيم النصية القديمة تبقى قابلة للقراءة مؤقتاً. بعد ضبط `INTEGRATION_ENCRYPTION_KEY` وأخذ نسخة احتياطية من قاعدة البيانات، شغّل:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npx prisma migrate deploy
+npm run db:encrypt-secrets
+```
+
+الأمر قابل لإعادة التشغيل بأمان؛ يتخطى القيم المشفرة مسبقاً ويشفّر أسرار مساحات العمل وأسرار المنصة القديمة.
+
+## Meta Webhook وGraph API
+
+مسار Webhook هو:
+
+```text
+/api/webhooks/whatsapp
+```
+
+التحقق من `X-Hub-Signature-256` إلزامي ويُرفض الطلب إذا لم يكن `META_APP_SECRET` مضبوطاً أو كان التوقيع غير صالح. يُخزّن الحدث في PostgreSQL قبل إعادة رد النجاح إلى Meta، ثم تعالجه مهمة مجدولة.
+
+إصدار Graph API موحد للإرسال والوسائط والتفريغ الصوتي عبر:
+
+```env
+META_GRAPH_VERSION="v21.0"
+```
+
+تُحفظ معرفات الرسائل الصادرة وحالاتها: `PENDING` و`ACCEPTED` و`SENT` و`DELIVERED` و`READ` و`FAILED`. أحداث الحالة الأقدم لا تستطيع إرجاع رسالة إلى حالة سابقة.
+
+## عامل Webhook وCron
+
+أحداث الرسائل والحالات تدخل جدول `WebhookEvent`. القيد الفريد `(provider, externalId)` يمنع التكرار، ويستخدم الاستلام `FOR UPDATE SKIP LOCKED` لمنع عاملين من معالجة الحدث نفسه. تُعاد المحاولة تلقائياً حتى خمس محاولات، وتُسترد الأحداث العالقة في `PROCESSING`.
+
+في Vercel يوجد في `vercel.json` جدول كل دقيقة للمسار:
+
+```text
+/api/cron/webhooks
+```
+
+يجب ضبط `CRON_SECRET` في بيئة النشر. عند التشغيل خارج Vercel، نفّذ طلباً مجدولاً مماثلاً مع الترويسة:
+
+```text
+Authorization: Bearer <CRON_SECRET>
+```
+
+## الاختبارات والتحقق
+
+```bash
+npm test
+npx tsc --noEmit
+npm run build
+```
+
+تشمل الاختبارات التشفير وسياق المساحة، توقيع Meta، منع تكرار الرسائل، عزل الوكلاء والحظر، الطابور الدائم، وترتيب حالات التسليم.

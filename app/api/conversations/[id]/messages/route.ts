@@ -5,7 +5,9 @@ import {
   resolveWhatsAppCreds,
   sendWhatsAppMessage,
   sendWhatsAppTemplate,
+  type WhatsAppResult,
 } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getStaffRestrictionFilter } from "@/lib/conversations";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
@@ -25,6 +27,10 @@ function serialize(m: {
   mediaMime: string | null;
   mediaType: string | null;
   rating: string | null;
+  waMessageId: string | null;
+  deliveryStatus: string;
+  deliveryError: string | null;
+  statusUpdatedAt: Date | null;
   createdAt: Date;
   sender?: { name: string } | null;
 }) {
@@ -39,6 +45,10 @@ function serialize(m: {
     mediaMime: m.mediaMime,
     mediaType: m.mediaType,
     rating: m.rating,
+    waMessageId: m.waMessageId,
+    deliveryStatus: m.deliveryStatus,
+    deliveryError: m.deliveryError,
+    statusUpdatedAt: m.statusUpdatedAt?.toISOString() ?? null,
     createdAt: m.createdAt.toISOString(),
     senderName: m.sender?.name ?? null,
   };
@@ -191,21 +201,30 @@ export async function POST(req: Request, { params }: Params) {
   // الإرسال الخارجي لواتساب فقط — الفشل لا يمنع حفظ الرسالة
   // بيانات الاعتماد من إعدادات مساحة العمل مع .env كبديل
   // الملاحظات الداخلية لا تُرسل أبداً
-  let waSent: boolean | null = null;
+  let waResult: WhatsAppResult | null = null;
+  let savedMessage = message;
   if (!isNote && conversation.platform === "WHATSAPP") {
     const creds = await resolveWhatsAppCreds(ctx.workspaceId);
     // القوالب ترسل عبر واجهة القوالب (خارج نافذة ٢٤ ساعة) — مزود ميتا فقط
-    waSent = template
+    waResult = template
       ? await sendWhatsAppTemplate(
           conversation.contact.waPhone,
           { name: template.name, language: template.language, params: paramsList },
           creds
         )
       : await sendWhatsAppMessage(conversation.contact.waPhone, bodyText, creds);
+    savedMessage = await prisma.message.update({
+      where: { id: message.id },
+      data: outboundDeliveryFields(waResult),
+    });
   }
 
   return NextResponse.json(
-    { message: serialize(message), waSent },
+    {
+      message: serialize(savedMessage),
+      waSent: waResult?.ok ?? null,
+      waError: waResult?.error ?? null,
+    },
     { status: 201 }
   );
 }

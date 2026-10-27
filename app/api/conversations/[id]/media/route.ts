@@ -6,8 +6,8 @@ import {
   resolveWhatsAppCreds,
   sendWhatsAppMedia,
   uploadWhatsAppMedia,
-  getLastWhatsAppError,
 } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { saveMediaAsset } from "@/lib/assets";
 import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
@@ -68,7 +68,7 @@ export async function POST(req: Request, { params }: Params) {
   // UltraMsg: يرسل الملف مباشرة كـ base64 — نخزنه محلياً كأصل لعرضه في الوارد
   let mediaId: string | null = null;
   if (creds.provider === "meta") {
-    mediaId = await uploadWhatsAppMedia(
+    const upload = await uploadWhatsAppMedia(
       {
         buffer,
         mime: file.type || "application/octet-stream",
@@ -76,13 +76,13 @@ export async function POST(req: Request, { params }: Params) {
       },
       creds
     );
-    if (!mediaId) {
-      const detail = getLastWhatsAppError();
+    if (!upload.mediaId) {
       return NextResponse.json(
-        { error: "فشل رفع الملف إلى ميتا" + (detail ? ` — ${detail}` : "") },
+        { error: upload.error ?? "فشل رفع الملف إلى ميتا" },
         { status: 502 }
       );
     }
+    mediaId = upload.mediaId;
   } else {
     const asset = await saveMediaAsset({
       workspaceId: ctx.workspaceId,
@@ -118,7 +118,7 @@ export async function POST(req: Request, { params }: Params) {
   });
   triggerConversationUpdated(ctx.workspaceId, params.id);
 
-  const waSent = await sendWhatsAppMedia(
+  const waResult = await sendWhatsAppMedia(
     conversation.contact.waPhone,
     {
       mediaId: mediaId ?? "",
@@ -131,17 +131,22 @@ export async function POST(req: Request, { params }: Params) {
     },
     creds
   );
+  const savedMessage = await prisma.message.update({
+    where: { id: message.id },
+    data: outboundDeliveryFields(waResult),
+  });
 
   return NextResponse.json(
     {
       message: {
-        ...message,
-        createdAt: message.createdAt.toISOString(),
+        ...savedMessage,
+        createdAt: savedMessage.createdAt.toISOString(),
+        statusUpdatedAt: savedMessage.statusUpdatedAt?.toISOString() ?? null,
         senderName: null,
       },
-      waSent,
+      waSent: waResult.ok,
       // سبب فشل الإرسال إلى واتساب إن وجد — ليظهر للمستخدم في التنبيه
-      waError: waSent ? null : getLastWhatsAppError(),
+      waError: waResult.error,
     },
     { status: 201 }
   );

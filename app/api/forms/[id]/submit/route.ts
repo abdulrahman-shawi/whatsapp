@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
+import { outboundDeliveryFields } from "@/lib/message-delivery";
 import { triggerConversationUpdated, triggerNewMessage } from "@/lib/pusher";
 import { isContactStage } from "@/lib/contact-stages";
 import { recordStageChange } from "@/lib/stage-history";
@@ -204,29 +205,28 @@ export async function POST(
   if (agent?.welcomeMessage) {
     try {
       const creds = await resolveWhatsAppCreds(workspaceId);
-      const sent = await sendWhatsAppMessage(phone, agent.welcomeMessage, creds);
-      if (sent) {
-        const welcome = await prisma.message.create({
-          data: {
-            conversationId: conversation.id,
-            direction: "OUTBOUND",
-            senderType: "AI",
-            body: agent.welcomeMessage,
-          },
+      const result = await sendWhatsAppMessage(phone, agent.welcomeMessage, creds);
+      const welcome = await prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: "OUTBOUND",
+          senderType: "AI",
+          body: agent.welcomeMessage,
+          ...outboundDeliveryFields(result),
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: welcome.createdAt },
+      });
+      try {
+        triggerNewMessage(workspaceId, conversation.id, {
+          ...welcome,
+          createdAt: welcome.createdAt.toISOString(),
+          senderName: null,
         });
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { lastMessageAt: welcome.createdAt },
-        });
-        try {
-          triggerNewMessage(workspaceId, conversation.id, {
-            ...welcome,
-            createdAt: welcome.createdAt.toISOString(),
-            senderName: null,
-          });
-        } catch {
-          // البث الفوري تجميلي — الاستطلاع الدوري يغطي غيابه
-        }
+      } catch {
+        // البث الفوري تجميلي — الاستطلاع الدوري يغطي غيابه
       }
     } catch {
       // فشل الترحيب لا يفشل استلام الطلب

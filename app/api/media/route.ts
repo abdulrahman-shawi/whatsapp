@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getIntegration } from "@/lib/settings";
+import { metaGraphUrl } from "@/lib/meta-graph";
 
 // حد تخزين نسخة محلية من الوسائط القادمة من المزود (روابط ميتا المؤقتة قد تنتهي)
 const CACHE_MAX_SIZE = 8 * 1024 * 1024;
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
       if (!token) {
         return NextResponse.json({ error: "توكن واتساب غير مضبوط" }, { status: 500 });
       }
-      const meta = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+      const meta = await fetch(metaGraphUrl(encodeURIComponent(mediaId)), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!meta.ok) {

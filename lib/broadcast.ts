@@ -221,9 +221,8 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
     const variant = variantForContact(contact.id, hasB);
     const body =
       variant === "B" && campaign.bodyB ? campaign.bodyB : campaign.body;
-    const ok =
-      creds &&
-      (template
+    const result = creds
+      ? template
         ? // تخصيص قيم المتغيرات لكل عميل: {{name}} داخل أي قيمة تُستبدل باسم العميل
           await sendWhatsAppTemplate(
             contact.waPhone,
@@ -241,8 +240,9 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
             contact.waPhone,
             personalize(body, displayName, linkFor(contact.id, variant)),
             creds
-          ));
-    if (ok) {
+          )
+      : null;
+    if (result?.ok) {
       sent++;
       if (variant === "B") sentB++;
     } else {
@@ -261,7 +261,7 @@ export async function sendBroadcast(campaignId: string): Promise<void> {
         },
       }),
     ];
-    if (ok) {
+    if (result?.ok) {
       updates.push(prisma.usageRecord.upsert({
         where: {
           workspaceId_month: { workspaceId: campaign.workspaceId, month },

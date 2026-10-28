@@ -22,6 +22,22 @@ export const INTEGRATION_KEYS = [
     env: ["ULTRAMSG_INSTANCE_ID"],
   },
   { key: "ULTRAMSG_TOKEN", label: "توكن UltraMsg", env: ["ULTRAMSG_TOKEN"] },
+  { key: "TELEGRAM_BOT_TOKEN", label: "توكن بوت تيليجرام", env: ["TELEGRAM_BOT_TOKEN"] },
+  {
+    key: "TELEGRAM_CHAT_ID",
+    label: "معرّف محادثة تيليجرام",
+    env: ["TELEGRAM_CHAT_ID"],
+  },
+  {
+    key: "WIDGET_API_KEY",
+    label: "مفتاح API للويدجت",
+    env: ["WIDGET_API_KEY"],
+  },
+  {
+    key: "WIDGET_APP_ID",
+    label: "معرّف تطبيق الويدجت",
+    env: ["WIDGET_APP_ID"],
+  },
   { key: "PUSHER_APP_ID", label: "معرّف تطبيق Pusher", env: ["PUSHER_APP_ID"] },
   {
     key: "PUSHER_KEY",
@@ -60,6 +76,12 @@ export type IntegrationKey = (typeof INTEGRATION_KEYS)[number]["key"];
 
 // مفاتيح غير سرية — تُعرض قيمتها كنص صريح في الواجهة بدل الإخفاء
 const NON_SECRET = new Set<string>([
+  "WHATSAPP_PHONE_NUMBER_ID",
+  "ULTRAMSG_INSTANCE_ID",
+  "TELEGRAM_CHAT_ID",
+  "WIDGET_APP_ID",
+  "PUSHER_APP_ID",
+  "PUSHER_CLUSTER",
   "BUSINESS_HOURS_START",
   "BUSINESS_HOURS_END",
   "BUSINESS_HOURS_DAYS",

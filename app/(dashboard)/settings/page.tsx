@@ -4,6 +4,7 @@ import { getIntegrationList } from "@/lib/settings";
 import { getWorkspaceThemeColor } from "@/lib/theme";
 import { prisma } from "@/lib/prisma";
 import { IntegrationsForm } from "@/components/settings/integrations-form";
+import { ChannelIntegrations } from "@/components/settings/channel-integrations";
 import { TemplatesForm } from "@/components/settings/templates-form";
 import { MembersForm } from "@/components/settings/members-form";
 import { StaffPermissionsCard } from "@/components/settings/staff-permissions-card";
@@ -112,7 +113,7 @@ export default async function SettingsPage({
     {
       label: "التكاملات",
       items: [
-        { id: "integrations", label: "مفاتيح التكامل" },
+        { id: "integrations", label: "القنوات والتطبيقات" },
         { id: "guide", label: "الدليل المصور", href: "/settings/guide" },
       ],
     },
@@ -229,13 +230,21 @@ export default async function SettingsPage({
             id: "integrations",
             group: "التكاملات",
             node: (
-              <div>
-                <h3 className="text-base font-semibold">مفاتيح التكامل</h3>
-                <p className="mb-3 text-sm text-muted-foreground">
-                  مفاتيح التكامل الخاصة بمساحة عملك — عند ترك مفتاح فارغاً
-                  تُستخدم قيمة .env الافتراضية
-                </p>
-                <IntegrationsForm integrations={integrations} />
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-base font-semibold">القنوات والتطبيقات</h3>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    اختر القناة التي تريد الاتصال بها ثم اضغط زر الاختبار لفتح نافذة إدخال المفاتيح المطلوبة.
+                  </p>
+                </div>
+                <ChannelIntegrations integrations={integrations} />
+                <div className="pt-2">
+                  <h4 className="text-sm font-semibold text-muted-foreground">مفاتيح التكامل المتقدمة</h4>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    هذه الحقول للمطورين والخدمات الداخلية — لا تحتاج تعديلها عادة.
+                  </p>
+                  <IntegrationsForm integrations={integrations} />
+                </div>
               </div>
             ),
           },

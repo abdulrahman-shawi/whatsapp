@@ -21,6 +21,16 @@ export const INTEGRATION_KEYS = [
     env: ["ULTRAMSG_INSTANCE_ID"],
   },
   { key: "ULTRAMSG_TOKEN", label: "توكن UltraMsg", env: ["ULTRAMSG_TOKEN"] },
+  {
+    key: "TELEGRAM_BOT_TOKEN",
+    label: "توكن بوت تيليجرام",
+    env: ["TELEGRAM_BOT_TOKEN"],
+  },
+  {
+    key: "TELEGRAM_WEBHOOK_SECRET",
+    label: "سر الويب هوك لتيليجرام",
+    env: ["TELEGRAM_WEBHOOK_SECRET"],
+  },
   { key: "PUSHER_APP_ID", label: "معرّف تطبيق Pusher", env: ["PUSHER_APP_ID"] },
   {
     key: "PUSHER_KEY",

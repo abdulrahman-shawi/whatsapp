@@ -112,7 +112,7 @@ export default async function SettingsPage({
     {
       label: "التكاملات",
       items: [
-        { id: "integrations", label: "مفاتيح التكامل" },
+        { id: "integrations", label: "القنوات والتطبيقات" },
         { id: "guide", label: "الدليل المصور", href: "/settings/guide" },
       ],
     },
@@ -230,10 +230,10 @@ export default async function SettingsPage({
             group: "التكاملات",
             node: (
               <div>
-                <h3 className="text-base font-semibold">مفاتيح التكامل</h3>
+                <h3 className="text-base font-semibold">القنوات والتطبيقات</h3>
                 <p className="mb-3 text-sm text-muted-foreground">
-                  مفاتيح التكامل الخاصة بمساحة عملك — عند ترك مفتاح فارغاً
-                  تُستخدم قيمة .env الافتراضية
+                  اختر القناة التي تريد ربطها بمساحة عملك، ثم أضف بيانات
+                  الاعتماد المطلوبة من النافذة المنبثقة
                 </p>
                 <IntegrationsForm integrations={integrations} />
               </div>

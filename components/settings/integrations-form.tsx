@@ -1,145 +1,428 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Eraser, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  Check,
+  Eraser,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Globe,
+  Loader2,
+  MessageCircle,
+  Send,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { IntegrationInfo } from "@/lib/settings";
+import type { IntegrationInfo, IntegrationKey } from "@/lib/settings";
 
-// نموذج مفاتيح التكامل: الحقل الفارغ يعني الإبقاء على الحالي أو .env
+type ChannelId = "whatsapp" | "telegram" | "widget";
+type WhatsAppProvider = "meta" | "ultramsg";
+
+const CHANNEL_KEYS: Record<Exclude<ChannelId, "widget">, IntegrationKey[]> = {
+  whatsapp: [
+    "WHATSAPP_TOKEN",
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "META_APP_SECRET",
+    "ULTRAMSG_INSTANCE_ID",
+    "ULTRAMSG_TOKEN",
+  ],
+  telegram: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"],
+};
+
+const META_KEYS = CHANNEL_KEYS.whatsapp.slice(0, 4);
+const ULTRAMSG_KEYS = CHANNEL_KEYS.whatsapp.slice(4);
+
+// قنوات الاتصال: كل قناة تفتح نموذجاً مستقلاً، والحقل الفارغ يبقي القيمة الحالية.
 export function IntegrationsForm({
-  integrations,
+  integrations: initialIntegrations,
 }: {
   integrations: IntegrationInfo[];
 }) {
-  // الحقول المعدّلة فقط تُرسل عند الحفظ
+  const [integrations, setIntegrations] = useState(initialIntegrations);
+  const [activeChannel, setActiveChannel] = useState<ChannelId | null>(null);
+  const [provider, setProvider] = useState<WhatsAppProvider>("meta");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [cleared, setCleared] = useState<Record<string, boolean>>({});
+  const [visible, setVisible] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
-  const sourceBadge = (source: IntegrationInfo["source"]) =>
-    source === "db" ? (
-      <Badge variant="default">من قاعدة البيانات</Badge>
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (activeChannel && dialog && !dialog.open) dialog.showModal();
+  }, [activeChannel]);
+
+  function openChannel(channel: ChannelId) {
+    setDraft({});
+    setCleared({});
+    setVisible({});
+    setSaving(false);
+    setSaved(false);
+    setError("");
+    setActiveChannel(channel);
+  }
+
+  function closeDialog() {
+    dialogRef.current?.close();
+  }
+
+  function getItem(key: IntegrationKey) {
+    return integrations.find((item) => item.key === key);
+  }
+
+  function hasValue(key: IntegrationKey) {
+    return Boolean(getItem(key)?.source);
+  }
+
+  function hasCompleteWhatsAppSetup() {
+    return META_KEYS.every(hasValue) || ULTRAMSG_KEYS.every(hasValue);
+  }
+
+  function channelStatus(channel: ChannelId) {
+    if (channel === "widget") return <Badge variant="secondary">لا تحتاج مفاتيح</Badge>;
+    if (channel === "telegram") {
+      return hasValue("TELEGRAM_BOT_TOKEN") ? (
+        <Badge variant="success">بيانات محفوظة</Badge>
+      ) : (
+        <Badge variant="outline">لم تُضف بيانات</Badge>
+      );
+    }
+    if (hasCompleteWhatsAppSetup()) return <Badge variant="success">بيانات محفوظة</Badge>;
+    return CHANNEL_KEYS.whatsapp.some(hasValue) ? (
+      <Badge variant="secondary">الإعداد غير مكتمل</Badge>
+    ) : (
+      <Badge variant="outline">لم تُضف بيانات</Badge>
+    );
+  }
+
+  function sourceBadge(source: IntegrationInfo["source"]) {
+    return source === "db" ? (
+      <Badge variant="default">محفوظ لمساحة العمل</Badge>
     ) : source === "env" ? (
-      <Badge variant="secondary">من .env</Badge>
+      <Badge variant="secondary">من إعدادات الخادم</Badge>
     ) : (
       <Badge variant="outline">غير مضبوط</Badge>
     );
-
-  // مسح التجاوز المخزن: نرسل القيمة فارغة ليُحذف الصف
-  function clearKey(key: string) {
-    setDraft((prev) => ({ ...prev, [key]: "" }));
-    setCleared((prev) => ({ ...prev, [key]: true }));
   }
 
-  async function handleSave() {
-    // لا نرسل الحقول التي لم تُمسّ
+  function updateDraft(key: IntegrationKey, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setCleared((current) => ({ ...current, [key]: false }));
+    setSaved(false);
+    setError("");
+  }
+
+  function clearKey(key: IntegrationKey) {
+    setDraft((current) => ({ ...current, [key]: "" }));
+    setCleared((current) => ({ ...current, [key]: true }));
+    setSaved(false);
+  }
+
+  function undoClear(key: IntegrationKey) {
+    setDraft((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setCleared((current) => ({ ...current, [key]: false }));
+  }
+
+  function renderField(
+    key: IntegrationKey,
+    options?: { description?: string; placeholder?: string; optional?: boolean }
+  ) {
+    const item = getItem(key);
+    if (!item) return null;
+    const isVisible = visible[key];
+    const isCleared = cleared[key];
+
+    return (
+      <div key={key} className="space-y-2 border-b pb-5 last:border-b-0 last:pb-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Label htmlFor={`channel-key-${key}`}>
+            {item.label}
+            {options?.optional && (
+              <span className="mr-1 font-normal text-muted-foreground">(اختياري)</span>
+            )}
+          </Label>
+          {isCleared ? <Badge variant="outline">سيُحذف عند الحفظ</Badge> : sourceBadge(item.source)}
+        </div>
+        {(item.masked || item.value) && !isCleared && (
+          <p className="text-xs text-muted-foreground" dir="ltr">{item.masked ?? item.value}</p>
+        )}
+        <div className="relative">
+          <Input
+            id={`channel-key-${key}`}
+            type={item.secret && !isVisible ? "password" : "text"}
+            dir="ltr"
+            className="text-left pl-11"
+            placeholder={options?.placeholder ?? ""}
+            value={draft[key] ?? ""}
+            onChange={(event) => updateDraft(key, event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby={options?.description ? `channel-help-${key}` : undefined}
+          />
+          {item.secret && (
+            <button
+              type="button"
+              className="absolute left-1 top-1 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setVisible((current) => ({ ...current, [key]: !current[key] }))}
+              aria-label={isVisible ? `إخفاء ${item.label}` : `إظهار ${item.label}`}
+            >
+              {isVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p id={`channel-help-${key}`} className="text-xs leading-5 text-muted-foreground">
+            {options?.description ?? "اترك الحقل فارغاً للإبقاء على القيمة الحالية."}
+          </p>
+          {item.source === "db" && !isCleared && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={() => clearKey(key)}
+            >
+              <Eraser className="h-4 w-4" />
+              مسح المحفوظ
+            </Button>
+          )}
+          {isCleared && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => undoClear(key)}>تراجع</Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const dirty = Object.entries(draft).some(([key, value]) => value !== "" || cleared[key]);
+
+  async function handleSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     const payload: Record<string, string> = {};
     for (const [key, value] of Object.entries(draft)) {
       if (value !== "" || cleared[key]) payload[key] = value;
     }
-    if (Object.keys(payload).length === 0) return;
+    if (Object.keys(payload).length === 0 || saving) return;
 
     setSaving(true);
     setError("");
     setSaved(false);
-    const res = await fetch("/api/settings/integrations", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setSaving(false);
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      setError(data?.error ?? "حدث خطأ أثناء الحفظ");
-      return;
+    try {
+      const response = await fetch("/api/settings/integrations", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? "حدث خطأ أثناء الحفظ");
+      if (Array.isArray(data?.integrations)) setIntegrations(data.integrations);
+      setDraft({});
+      setCleared({});
+      setVisible({});
+      setSaved(true);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "تعذّر الاتصال بالخادم");
+    } finally {
+      setSaving(false);
     }
-    setSaved(true);
-    setDraft({});
-    setCleared({});
-    // تحديث الشارات والقيم المقنّعة من الخادم
-    window.location.reload();
   }
 
-  const dirty = Object.entries(draft).some(
-    ([k, v]) => v !== "" || cleared[k]
-  );
+  const channels = [
+    {
+      id: "whatsapp" as const,
+      title: "واتساب",
+      description: "اربط رقم نشاطك عبر Meta Cloud API أو UltraMsg.",
+      icon: MessageCircle,
+      action: "إعداد واتساب",
+    },
+    {
+      id: "telegram" as const,
+      title: "تيليجرام",
+      description: "أضف توكن البوت وسر الويب هوك لاستقبال رسائل عملائك.",
+      icon: Send,
+      action: "إعداد تيليجرام",
+    },
+    {
+      id: "widget" as const,
+      title: "ودجت / نافذة منبثقة",
+      description: "أضف محادثة ذكية إلى موقعك وخصّص مظهرها ورسالة الترحيب.",
+      icon: Globe,
+      action: "إعداد قناة الموقع",
+    },
+  ];
 
   return (
-    <div className="space-y-4">
-      {integrations.map((item) => (
-        <div key={item.key} className="rounded-lg border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <Label htmlFor={`key-${item.key}`}>{item.label}</Label>
-              <p className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
-                {item.envName}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {(item.masked || item.value) && (
-                <span className="text-xs text-muted-foreground" dir="ltr">
-                  {cleared[item.key] ? "—" : (item.masked ?? item.value)}
-                </span>
-              )}
-              {cleared[item.key] ? (
-                <Badge variant="outline">سيعود إلى .env</Badge>
-              ) : (
-                sourceBadge(item.source)
-              )}
-            </div>
-          </div>
-          <div className="mt-3 flex gap-2">
-            <Input
-              id={`key-${item.key}`}
-              type={item.secret ? "password" : "text"}
-              dir="ltr"
-              className="text-left"
-              placeholder=""
-              value={draft[item.key] ?? ""}
-              onChange={(e) => {
-                setDraft((prev) => ({ ...prev, [item.key]: e.target.value }));
-                setCleared((prev) => ({ ...prev, [item.key]: false }));
-                setSaved(false);
-              }}
-            />
-            {item.source === "db" && !cleared[item.key] && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-                onClick={() => clearKey(item.key)}
-              >
-                <Eraser className="h-4 w-4" />
-                مسح
+    <>
+      <div className="grid gap-3 md:grid-cols-3">
+        {channels.map((channel) => {
+          const Icon = channel.icon;
+          return (
+            <button
+              key={channel.id}
+              type="button"
+              onClick={() => openChannel(channel.id)}
+              className="group flex min-h-52 flex-col items-start rounded-2xl border bg-card p-5 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-0"
+              aria-haspopup="dialog"
+              aria-controls="channel-settings-dialog"
+            >
+              <Icon className="h-7 w-7 text-primary" aria-hidden="true" />
+              <span className="mt-4 text-base font-bold">{channel.title}</span>
+              <span className="mt-1.5 text-sm leading-6 text-muted-foreground">{channel.description}</span>
+              <span className="mt-auto flex w-full items-center justify-between gap-2 pt-5">
+                {channelStatus(channel.id)}
+                <ArrowLeft className="h-4 w-4 text-muted-foreground transition-transform group-hover:-translate-x-1" />
+              </span>
+              <span className="sr-only">{channel.action}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-xs leading-5 text-muted-foreground">
+        تُحفظ بيانات كل قناة على حدة. لا يعني ظهور «بيانات محفوظة» أن القناة متصلة؛ يعتمد الاتصال أيضاً على إعداد الويب هوك لدى المزوّد.
+      </p>
+
+      <dialog
+        ref={dialogRef}
+        id="channel-settings-dialog"
+        className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-3xl border bg-card p-0 text-card-foreground shadow-2xl backdrop:bg-slate-950/55 backdrop:backdrop-blur-sm"
+        aria-labelledby="channel-dialog-title"
+        onCancel={(event) => {
+          event.preventDefault();
+          closeDialog();
+        }}
+        onClose={() => {
+          setActiveChannel(null);
+          setDraft({});
+          setCleared({});
+          setVisible({});
+          setError("");
+          setSaved(false);
+        }}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeDialog();
+        }}
+      >
+        {activeChannel && (
+          <div className="p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4 border-b pb-5">
+              <div>
+                <h3 id="channel-dialog-title" className="text-xl font-bold">
+                  {channels.find((channel) => channel.id === activeChannel)?.title}
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {activeChannel === "whatsapp" && "أدخل بيانات المزوّد الذي تستخدمه لإدارة رسائل واتساب."}
+                  {activeChannel === "telegram" && "انسخ بيانات البوت من BotFather ثم احفظها هنا."}
+                  {activeChannel === "widget" && "لا تحتاج قناة الموقع إلى مفاتيح سرية؛ كل ما تحتاجه هو كود التضمين."}
+                </p>
+              </div>
+              <Button type="button" variant="ghost" size="icon" onClick={closeDialog} aria-label="إغلاق النافذة">
+                <X className="h-5 w-5" />
               </Button>
+            </div>
+
+            {activeChannel === "widget" ? (
+              <div className="pt-6">
+                <p className="text-sm leading-7 text-muted-foreground">
+                  اختر الوكيل، خصّص ألوان الودجت ورسالة الترحيب، ثم انسخ كود التضمين إلى موقعك. يظهر للزائر كزر محادثة يفتح نافذة منبثقة.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <Button asChild>
+                    <Link href="/widget" onClick={closeDialog}>
+                      فتح إعدادات الودجت
+                      <ExternalLink className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                  <Button type="button" variant="outline" onClick={closeDialog}>إغلاق</Button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSave} className="pt-6">
+                {activeChannel === "whatsapp" && (
+                  <>
+                    <div className="mb-6 grid grid-cols-2 rounded-2xl bg-muted p-1" role="tablist" aria-label="مزوّد واتساب">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={provider === "meta"}
+                        onClick={() => setProvider("meta")}
+                        className={`min-h-11 rounded-xl px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${provider === "meta" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        Meta Cloud API
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={provider === "ultramsg"}
+                        onClick={() => setProvider("ultramsg")}
+                        className={`min-h-11 rounded-xl px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${provider === "ultramsg" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        UltraMsg
+                      </button>
+                    </div>
+                    <div className="space-y-5" role="tabpanel">
+                      {provider === "meta" ? (
+                        <>
+                          {renderField("WHATSAPP_TOKEN", { description: "رمز الوصول الدائم من إعدادات Meta للمطورين." })}
+                          {renderField("WHATSAPP_PHONE_NUMBER_ID", { description: "معرّف رقم الهاتف، وليس رقم الهاتف نفسه.", placeholder: "123456789012345" })}
+                          {renderField("WHATSAPP_VERIFY_TOKEN", { description: "قيمة تختارها وتطابقها في إعداد Webhook لدى Meta." })}
+                          {renderField("META_APP_SECRET", { description: "سر التطبيق المستخدم للتحقق من توقيع طلبات الويب هوك." })}
+                        </>
+                      ) : (
+                        <>
+                          {renderField("ULTRAMSG_INSTANCE_ID", { description: "معرّف النسخة الظاهر في لوحة UltraMsg.", placeholder: "instance12345" })}
+                          {renderField("ULTRAMSG_TOKEN", { description: "التوكن الخاص بالنسخة من لوحة UltraMsg." })}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {activeChannel === "telegram" && (
+                  <div className="space-y-5">
+                    {renderField("TELEGRAM_BOT_TOKEN", {
+                      description: "التوكن الذي يرسله BotFather عند إنشاء البوت.",
+                      placeholder: "123456789:AA...",
+                    })}
+                    {renderField("TELEGRAM_WEBHOOK_SECRET", {
+                      description: "قيمة سرية تختارها للتحقق من طلبات الويب هوك الواردة.",
+                      optional: true,
+                    })}
+                  </div>
+                )}
+
+                {error && (
+                  <p className="mt-5 rounded-xl bg-destructive/10 p-3 text-sm text-destructive" role="alert">{error}</p>
+                )}
+                {saved && (
+                  <p className="mt-5 rounded-xl bg-emerald-500/10 p-3 text-sm font-medium text-emerald-700" role="status">
+                    تم حفظ بيانات القناة بنجاح.
+                  </p>
+                )}
+                <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-5">
+                  <Button type="submit" disabled={!dirty || saving}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
+                    {saving ? "جارٍ الحفظ…" : saved ? "تم الحفظ" : "حفظ بيانات القناة"}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={closeDialog} disabled={saving}>إغلاق</Button>
+                </div>
+              </form>
             )}
           </div>
-        </div>
-      ))}
-
-      {error && (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="flex items-center gap-3">
-        <Button onClick={handleSave} disabled={!dirty || saving}>
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : saved ? (
-            <Check className="h-4 w-4" />
-          ) : null}
-          حفظ المفاتيح
-        </Button>
-        {saved && <span className="text-sm text-emerald-600">تم الحفظ</span>}
-      </div>
-    </div>
+        )}
+      </dialog>
+    </>
   );
 }

@@ -92,6 +92,7 @@ export async function PUT(req: Request) {
     if (key.startsWith("ULTRAMSG")) touched.add("ultramsg");
     else if (key.startsWith("OPENAI") || key.startsWith("AI_")) touched.add("openai");
     else if (key.startsWith("WHATSAPP") || key.startsWith("META")) touched.add("whatsapp");
+    else if (key.startsWith("TELEGRAM")) touched.add("telegram");
     else if (key.startsWith("PUSHER")) touched.add("pusher");
     else touched.add("other");
   }

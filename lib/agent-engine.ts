@@ -36,6 +36,7 @@ import { escalateCriticalConversation } from "@/lib/critical-conversations";
 import { synthesizeVoiceReply } from "@/lib/text-to-speech";
 import { parseCsatRating } from "@/lib/csat";
 import { workspaceIsReadOnly } from "@/lib/billing/workspace-access";
+import { sendTelegramMessage } from "@/lib/telegram";
 
 type AgentWithKnowledge = Agent & { knowledgeSources: KnowledgeSource[] };
 
@@ -138,7 +139,7 @@ type PipelineOptions = {
   waPhone: string;
   contactName: string | null;
   text: string;
-  platform: "WHATSAPP" | "WIDGET";
+  platform: "WHATSAPP" | "WIDGET" | "TELEGRAM";
   conversationId?: string;
   referral?: {
     sourceType?: string;
@@ -181,7 +182,7 @@ async function sendAgentReply(
   return { voiceSent: false, mediaId: null };
 }
 
-// خط معالجة الرسالة الواردة المشترك بين واتساب والويدجت
+// خط معالجة الرسالة الواردة المشترك بين واتساب وتيليجرام والويدجت
 async function runPipeline(
   opts: PipelineOptions
 ): Promise<{
@@ -648,8 +649,10 @@ async function storeInboundWithoutAgent(input: {
   contactName: string | null;
   text: string;
   workspaceId?: string;
+  platform?: "WHATSAPP" | "TELEGRAM";
   media?: { mediaId: string; mediaMime: string | null; mediaType: string | null };
 }): Promise<void> {
+  const platform = input.platform ?? "WHATSAPP";
   // Multi-tenant: نستخدم مساحة العمل المحلولة من رقم الهاتف،
   // وإن تعذّرت نعود لأول مساحة عمل (سلوك احتياطي قديم)
   let workspaceId = input.workspaceId;
@@ -684,7 +687,7 @@ async function storeInboundWithoutAgent(input: {
   });
 
   let conversation = await prisma.conversation.findFirst({
-    where: { contactId: contact.id, platform: "WHATSAPP", isArchived: false },
+    where: { contactId: contact.id, platform, isArchived: false },
   });
   const isNewConversation = !conversation;
   if (!conversation) {
@@ -692,7 +695,7 @@ async function storeInboundWithoutAgent(input: {
       data: {
         workspaceId,
         contactId: contact.id,
-        platform: "WHATSAPP",
+        platform,
         status: "MANUAL",
       },
     });
@@ -898,6 +901,61 @@ export async function handleIncomingWhatsAppMessage(input: {
   } catch (e) {
     // لا ندع الويب هوك يفشل أبداً — ميتا تعيد إرسال الحدث عند 5xx
     console.error("[agent-engine] خطأ في خط المعالجة:", e);
+  }
+}
+
+// نقطة دخول تيليجرام: معرّف المحادثة هو هوية جهة الاتصال، ولا نعامله كرقم هاتف.
+export async function handleIncomingTelegramMessage(input: {
+  workspaceId: string;
+  chatId: string;
+  contactName: string | null;
+  text: string;
+}): Promise<void> {
+  try {
+    if (!/^-?\d+$/.test(input.chatId) || !input.text.trim()) return;
+    const waPhone = `telegram:${input.chatId}`;
+
+    const blockedContact = await prisma.contact.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        waPhone,
+        blocked: true,
+      },
+      select: { id: true },
+    });
+    if (blockedContact) return;
+
+    const agent = await prisma.agent.findFirst({
+      where: { isActive: true, workspaceId: input.workspaceId },
+      include: { knowledgeSources: true },
+    });
+    if (!agent) {
+      await storeInboundWithoutAgent({
+        workspaceId: input.workspaceId,
+        waPhone,
+        contactName: input.contactName,
+        text: input.text,
+        platform: "TELEGRAM",
+      });
+      return;
+    }
+
+    const token = await getIntegration(
+      input.workspaceId,
+      "TELEGRAM_BOT_TOKEN"
+    );
+    await runPipeline({
+      workspaceId: input.workspaceId,
+      agent,
+      waPhone,
+      contactName: input.contactName,
+      text: input.text,
+      platform: "TELEGRAM",
+      sendReply: (to, body) =>
+        sendTelegramMessage(to.slice("telegram:".length), body, token),
+    });
+  } catch (error) {
+    console.error("[agent-engine] خطأ في رسالة تيليجرام:", error);
   }
 }
 

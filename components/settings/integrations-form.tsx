@@ -23,6 +23,14 @@ import type { IntegrationInfo, IntegrationKey } from "@/lib/settings";
 
 type ChannelId = "whatsapp" | "telegram" | "widget";
 type WhatsAppProvider = "meta" | "ultramsg";
+type TelegramConnection = {
+  configured: boolean;
+  connected: boolean;
+  username?: string | null;
+  webhookUrl?: string | null;
+  pendingUpdates?: number;
+  error?: string | null;
+};
 
 const CHANNEL_KEYS: Record<Exclude<ChannelId, "widget">, IntegrationKey[]> = {
   whatsapp: [
@@ -54,11 +62,45 @@ export function IntegrationsForm({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [connectionLoading, setConnectionLoading] = useState(false);
+  const [telegramConnection, setTelegramConnection] =
+    useState<TelegramConnection | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (activeChannel && dialog && !dialog.open) dialog.showModal();
+  }, [activeChannel]);
+
+  useEffect(() => {
+    if (activeChannel !== "telegram") return;
+    let cancelled = false;
+    setConnectionLoading(true);
+    fetch("/api/settings/integrations/telegram", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error ?? "تعذّر فحص الاتصال");
+        if (!cancelled && data?.connection) {
+          setTelegramConnection(data.connection);
+        }
+      })
+      .catch((statusError: unknown) => {
+        if (!cancelled) {
+          setTelegramConnection(null);
+          setError(
+            statusError instanceof Error
+              ? statusError.message
+              : "تعذّر فحص اتصال تيليجرام"
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setConnectionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeChannel]);
 
   function openChannel(channel: ChannelId) {
@@ -90,11 +132,17 @@ export function IntegrationsForm({
   function channelStatus(channel: ChannelId) {
     if (channel === "widget") return <Badge variant="secondary">لا تحتاج مفاتيح</Badge>;
     if (channel === "telegram") {
-      return hasValue("TELEGRAM_BOT_TOKEN") ? (
-        <Badge variant="success">بيانات محفوظة</Badge>
-      ) : (
-        <Badge variant="outline">لم تُضف بيانات</Badge>
-      );
+      if (telegramConnection?.connected) {
+        return <Badge variant="success">متصل</Badge>;
+      }
+      if (hasValue("TELEGRAM_BOT_TOKEN")) {
+        return telegramConnection?.configured ? (
+          <Badge variant="secondary">يلزم الاتصال</Badge>
+        ) : (
+          <Badge variant="secondary">بيانات محفوظة</Badge>
+        );
+      }
+      return <Badge variant="outline">لم تُضف بيانات</Badge>;
     }
     if (hasCompleteWhatsAppSetup()) return <Badge variant="success">بيانات محفوظة</Badge>;
     return CHANNEL_KEYS.whatsapp.some(hasValue) ? (
@@ -117,6 +165,12 @@ export function IntegrationsForm({
   function updateDraft(key: IntegrationKey, value: string) {
     setDraft((current) => ({ ...current, [key]: value }));
     setCleared((current) => ({ ...current, [key]: false }));
+    if (key.startsWith("TELEGRAM")) {
+      setTelegramConnection({
+        configured: hasValue("TELEGRAM_BOT_TOKEN"),
+        connected: false,
+      });
+    }
     setSaved(false);
     setError("");
   }
@@ -124,6 +178,9 @@ export function IntegrationsForm({
   function clearKey(key: IntegrationKey) {
     setDraft((current) => ({ ...current, [key]: "" }));
     setCleared((current) => ({ ...current, [key]: true }));
+    if (key.startsWith("TELEGRAM")) {
+      setTelegramConnection({ configured: false, connected: false });
+    }
     setSaved(false);
   }
 
@@ -229,6 +286,17 @@ export function IntegrationsForm({
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error ?? "حدث خطأ أثناء الحفظ");
       if (Array.isArray(data?.integrations)) setIntegrations(data.integrations);
+      if (activeChannel === "telegram") {
+        const items = Array.isArray(data?.integrations)
+          ? (data.integrations as IntegrationInfo[])
+          : integrations;
+        setTelegramConnection({
+          configured: Boolean(
+            items.find((item) => item.key === "TELEGRAM_BOT_TOKEN")?.source
+          ),
+          connected: false,
+        });
+      }
       setDraft({});
       setCleared({});
       setVisible({});
@@ -237,6 +305,32 @@ export function IntegrationsForm({
       setError(saveError instanceof Error ? saveError.message : "تعذّر الاتصال بالخادم");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTelegramConnect() {
+    if (connecting || saving || dirty || !hasValue("TELEGRAM_BOT_TOKEN")) return;
+    setConnecting(true);
+    setError("");
+    setSaved(false);
+    try {
+      const response = await fetch("/api/settings/integrations/telegram", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error ?? "تعذّر تسجيل Webhook تيليجرام");
+      }
+      if (Array.isArray(data?.integrations)) setIntegrations(data.integrations);
+      if (data?.connection) setTelegramConnection(data.connection);
+    } catch (connectError) {
+      setError(
+        connectError instanceof Error
+          ? connectError.message
+          : "تعذّر الاتصال بتيليجرام"
+      );
+    } finally {
+      setConnecting(false);
     }
   }
 
@@ -324,7 +418,7 @@ export function IntegrationsForm({
                 </h3>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   {activeChannel === "whatsapp" && "أدخل بيانات المزوّد الذي تستخدمه لإدارة رسائل واتساب."}
-                  {activeChannel === "telegram" && "انسخ بيانات البوت من BotFather ثم احفظها هنا."}
+                  {activeChannel === "telegram" && "انسخ توكن البوت من BotFather، احفظه، ثم اضغط «اتصال واختبار القناة»."}
                   {activeChannel === "widget" && "لا تحتاج قناة الموقع إلى مفاتيح سرية؛ كل ما تحتاجه هو كود التضمين."}
                 </p>
               </div>
@@ -397,9 +491,37 @@ export function IntegrationsForm({
                       placeholder: "123456789:AA...",
                     })}
                     {renderField("TELEGRAM_WEBHOOK_SECRET", {
-                      description: "قيمة سرية تختارها للتحقق من طلبات الويب هوك الواردة.",
+                      description: "اتركه فارغاً ليُنشأ سر قوي تلقائياً عند الاتصال.",
                       optional: true,
                     })}
+                    <div className="rounded-2xl border bg-muted/40 p-4" aria-live="polite">
+                      {connectionLoading ? (
+                        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          جارٍ فحص اتصال تيليجرام…
+                        </p>
+                      ) : telegramConnection?.connected ? (
+                        <div className="space-y-1">
+                          <p className="flex items-center gap-2 text-sm font-bold text-emerald-700">
+                            <Check className="h-4 w-4" />
+                            القناة متصلة وجاهزة لاستقبال الرسائل
+                            {telegramConnection.username ? ` @${telegramConnection.username}` : ""}
+                          </p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            أرسل الآن رسالة إلى البوت من تيليجرام؛ ستظهر في صندوق الوارد.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          حفظ التوكن وحده لا يستقبل الرسائل. بعد الحفظ اضغط «اتصال واختبار القناة» لتسجيل Webhook.
+                        </p>
+                      )}
+                      {telegramConnection?.error && !telegramConnection.connected && (
+                        <p className="mt-2 text-xs leading-5 text-destructive">
+                          آخر خطأ لدى تيليجرام: {telegramConnection.error}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -408,15 +530,41 @@ export function IntegrationsForm({
                 )}
                 {saved && (
                   <p className="mt-5 rounded-xl bg-emerald-500/10 p-3 text-sm font-medium text-emerald-700" role="status">
-                    تم حفظ بيانات القناة بنجاح.
+                    {activeChannel === "telegram"
+                      ? "تم حفظ البيانات. اضغط الآن «اتصال واختبار القناة»."
+                      : "تم حفظ بيانات القناة بنجاح."}
                   </p>
                 )}
                 <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-5">
-                  <Button type="submit" disabled={!dirty || saving}>
+                  <Button type="submit" disabled={!dirty || saving || connecting}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
                     {saving ? "جارٍ الحفظ…" : saved ? "تم الحفظ" : "حفظ بيانات القناة"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={closeDialog} disabled={saving}>إغلاق</Button>
+                  {activeChannel === "telegram" && (
+                    <Button
+                      type="button"
+                      variant={telegramConnection?.connected ? "outline" : "default"}
+                      onClick={handleTelegramConnect}
+                      disabled={
+                        !hasValue("TELEGRAM_BOT_TOKEN") || dirty || saving || connecting
+                      }
+                      title={dirty ? "احفظ التعديلات أولاً" : undefined}
+                    >
+                      {connecting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : telegramConnection?.connected ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      {connecting
+                        ? "جارٍ تسجيل Webhook…"
+                        : telegramConnection?.connected
+                          ? "إعادة اختبار الاتصال"
+                          : "اتصال واختبار القناة"}
+                    </Button>
+                  )}
+                  <Button type="button" variant="outline" onClick={closeDialog} disabled={saving || connecting}>إغلاق</Button>
                 </div>
               </form>
             )}

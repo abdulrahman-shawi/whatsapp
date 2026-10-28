@@ -10,6 +10,8 @@ import { triggerNewMessage, triggerConversationUpdated } from "@/lib/pusher";
 import { getStaffRestrictionFilter } from "@/lib/conversations";
 import { fireOutboundEvent } from "@/lib/outbound-webhooks";
 import { workspaceIsReadOnly, upgradeRequiredMessage } from "@/lib/billing/workspace-access";
+import { getIntegration } from "@/lib/settings";
+import { sendTelegramMessage, telegramChatId } from "@/lib/telegram";
 
 type Params = { params: { id: string } };
 
@@ -188,10 +190,11 @@ export async function POST(req: Request, { params }: Params) {
   triggerNewMessage(ctx.workspaceId, params.id, serialize(message));
   triggerConversationUpdated(ctx.workspaceId, params.id);
 
-  // الإرسال الخارجي لواتساب فقط — الفشل لا يمنع حفظ الرسالة
-  // بيانات الاعتماد من إعدادات مساحة العمل مع .env كبديل
-  // الملاحظات الداخلية لا تُرسل أبداً
+  // الإرسال الخارجي حسب القناة — الفشل لا يمنع حفظ الرسالة.
+  // بيانات الاعتماد من إعدادات مساحة العمل مع .env كبديل.
+  // الملاحظات الداخلية لا تُرسل أبداً.
   let waSent: boolean | null = null;
+  let telegramSent: boolean | null = null;
   if (!isNote && conversation.platform === "WHATSAPP") {
     const creds = await resolveWhatsAppCreds(ctx.workspaceId);
     // القوالب ترسل عبر واجهة القوالب (خارج نافذة ٢٤ ساعة) — مزود ميتا فقط
@@ -202,10 +205,18 @@ export async function POST(req: Request, { params }: Params) {
           creds
         )
       : await sendWhatsAppMessage(conversation.contact.waPhone, bodyText, creds);
+  } else if (!isNote && conversation.platform === "TELEGRAM") {
+    const chatId = telegramChatId(conversation.contact.waPhone);
+    const token = chatId
+      ? await getIntegration(ctx.workspaceId, "TELEGRAM_BOT_TOKEN")
+      : null;
+    telegramSent = chatId
+      ? await sendTelegramMessage(chatId, bodyText, token)
+      : false;
   }
 
   return NextResponse.json(
-    { message: serialize(message), waSent },
+    { message: serialize(message), waSent, telegramSent },
     { status: 201 }
   );
 }
